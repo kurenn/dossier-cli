@@ -36,7 +36,8 @@ cd dossier-cli
 go build -o dossier ./cmd/dossier
 ```
 
-Requires Go 1.26 or later. The result is a single static binary with no runtime.
+Requires Go 1.26.8 or later — earlier 1.26 patches carry known `crypto/tls` and
+`net/http` vulnerabilities on the path this client sends your token over. The result is a single static binary with no runtime.
 
 ## Getting started
 
