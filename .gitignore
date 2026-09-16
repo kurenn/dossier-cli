@@ -1,0 +1,16 @@
+# Build output
+/dossier
+/dist/
+*.exe
+
+# Coverage
+coverage.out
+coverage.html
+
+# The contract fixture, when the contract job lands: it holds live bearer tokens and raw
+# recipient PINs, printed in the clear by `bin/rails cli:seed_contract`. Ignored ahead of
+# the directory existing, so it cannot be committed by an absent-minded `git add -A`.
+/testdata/contract.json
+
+# Local tool state
+.direnv/

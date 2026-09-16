@@ -1,0 +1,10 @@
+PROFILE       default
+HOST          https://dossier.example
+TOKEN         dsk_BWBxo2sS…
+SOURCE        /home/you/.config/dossier/credentials.toml
+NAME          laptop
+VERIFIED      2026-09-15T17:02:11Z  (authenticated; scope not checked)
+
+Stated at login — Dossier does not report these over the API:
+SCOPES        fields:read shares:mint
+EXPIRES ON    2026-12-14

@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only by default. Nothing in this workflow writes to the repository, and a token
+# that cannot write cannot be used to push a malicious commit if a dependency in the
+# build is ever compromised.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The gate from the dev-loop profile. Kept here rather than in a script so a change to
+  # it shows up in a diff of the workflow.
+  COVERAGE_FLOOR: "85.0"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          # From go.mod, so the toolchain CI uses and the one the module declares can
+          # never drift apart.
+          go-version-file: go.mod
+          cache: true
+
+      # Formatting is checked rather than applied: a CI job that rewrites source is a CI
+      # job that hides the fact nobody ran gofmt.
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt'd:"
+            echo "$unformatted"
+            gofmt -d .
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: staticcheck
+        uses: dominikh/staticcheck-action@v1
+        with:
+          version: latest
+          install-go: false
+
+      # -race because the retry path sleeps and the transport is the kind of code that
+      # grows goroutines later; catching a data race the first time one appears is much
+      # cheaper than catching it in a flake.
+      #
+      # -coverpkg=./... because most of the transport and store code is exercised through
+      # the command tests. Per-package coverage would report those packages as thinly
+      # tested and this gate would be measuring the wrong thing.
+      - name: test
+        run: go test ./... -race -covermode=atomic -coverpkg=./... -coverprofile=coverage.out
+
+      - name: coverage gate
+        run: |
+          total="$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}' | tr -d '%')"
+          echo "Total coverage: ${total}%  (floor ${COVERAGE_FLOOR}%)"
+          awk -v total="$total" -v floor="$COVERAGE_FLOOR" \
+            'BEGIN { exit !(total + 0 >= floor + 0) }' \
+            || { echo "Coverage ${total}% is below the ${COVERAGE_FLOOR}% floor."; exit 1; }
+
+      # Proves the thing users actually install still builds, and that the version stamp
+      # the release process depends on is wired up.
+      - name: build
+        run: go build -ldflags "-X main.version=ci-${GITHUB_SHA::7}" -o /tmp/dossier ./cmd/dossier
+
+      - name: smoke
+        run: |
+          /tmp/dossier version
+          # `schema` is the one command that works with no token and no network profile;
+          # with no host reachable it must fail cleanly as exit 1, not panic.
+          set +e
+          /tmp/dossier schema --host http://127.0.0.1:1 >/dev/null 2>&1
+          code=$?
+          set -e
+          if [ "$code" -ne 1 ]; then
+            echo "An unreachable host gave exit ${code}, want 1."
+            exit 1
+          fi
+
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Separate job so a vulnerability in a dependency is reported even when a test is
+      # failing for an unrelated reason — the two answer different questions and one
+      # should not mask the other.
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...

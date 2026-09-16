@@ -1,0 +1,25 @@
+HOST        https://dossier.example
+
+ENDPOINTS
+  GET   /api/v1/schema                              (no token)
+  GET   /api/v1/fields                              fields:read
+  POST  /api/v1/shares                              shares:mint
+
+SCOPES              fields:read fields:write documents:write shares:mint shares:read
+FIELD CATEGORIES    identity travel tax health contact
+FIELD STATUSES      empty active pending withdrawn
+SHARE STATES        live expiring expired revoked
+
+LIMITS
+  pagination.fields.default_limit  50
+  pagination.fields.max_limit      200
+  uploads.max_file_bytes           26214400
+
+EXPIRY
+  REQUIRED    yes
+  PRESETS     PT24H P7D P30D P90D
+
+  Presets are ISO 8601 durations, not timestamps.
+
+  No expiry — This is the exception: the link works until you revoke it by hand.
+

@@ -1,0 +1,3 @@
+NAME       HOST                     PREFIX        EXPIRES     LABEL
+default *  https://dossier.example  dsk_BWBxo2sS  2026-12-14  laptop
+scripts    https://dossier.example  dsk_QK3mZp9T  —           read-only for cron
