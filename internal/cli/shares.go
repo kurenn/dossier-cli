@@ -43,8 +43,8 @@ func newSharesListCmd(app *App) *cobra.Command {
 			return app.runSharesList(cmd.Context(), opts)
 		},
 	}
-	cmd.Flags().StringVar(&opts.filter, "state", "", "Only shares in this state (see `dossier schema`)")
-	cmd.Flags().IntVar(&opts.limit, "limit", 0, "Rows per page (the API's default is 25, its maximum 100)")
+	cmd.Flags().StringVar(&opts.filter, "state", "", "Only shares in this state (see: dossier schema)")
+	cmd.Flags().IntVar(&opts.limit, "limit", 0, "Rows per page; the API's default and maximum are in: dossier schema")
 	cmd.Flags().BoolVar(&opts.all, "all", false, "Follow pagination to the end")
 	return cmd
 }
@@ -71,7 +71,7 @@ func (a *App) runSharesList(ctx context.Context, opts listOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := validateFilter("state", opts.filter, schema.ShareStates); err != nil {
+	if err := validateVocabulary("state", opts.filter, schema.ShareStates); err != nil {
 		return err
 	}
 

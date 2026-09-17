@@ -17,13 +17,13 @@ ID  TOKEN      TITLE                 RECIPIENT       STATE     DEADLINE      OPE
 
 ## Status
 
-**Milestone 1.** The foundations plus the read commands: `version`, `schema`, `login`,
-`logout`, `whoami`, `profiles`, `fields list`, `shares list` and `shares show`.
+**Milestone 2.** The foundations, the read commands, and the two that write to your
+vault: `version`, `schema`, `login`, `logout`, `whoami`, `profiles`, `fields list`,
+`shares list`, `shares show`, `fields create` and `documents attach`.
 
-Writing is not built yet — `fields create`, `documents attach`, `shares mint` and `open`
-are still ahead — so the listing above is partly what the client is being built toward
-rather than what it does today. Nothing here can alter your vault or release anything from
-it; this milestone only reads.
+Still ahead: `shares mint` and `open`. So nothing here can release anything from your
+vault or open a dossier as its recipient — this client can now add to a vault, but not
+share from one.
 
 ## Install
 
@@ -97,6 +97,33 @@ Before you have a token at all, `dossier schema` works: it prints the API's own
 description of itself, which is also where this client reads every limit, scope and
 filter value it uses.
 
+### Adding to your vault
+
+```bash
+dossier fields create --label "CURP"                        # asks for the value, hidden
+dossier fields create --label "CURP" --value-stdin < curp   # from a pipe
+dossier fields create --label "CURP" --value-file ./curp.txt
+dossier documents attach 118 ./passport.pdf
+```
+
+A field's value cannot be passed as an argument, and there is no `--value` flag that
+takes one. An argument would be written to your shell history and visible in `ps` to
+every other process on the machine while the command ran; the three ways above are the
+ways that are not. The value is never printed back either — not on success, not in an
+error, not under `--json`.
+
+`documents attach` checks the file against the size cap the API publishes before it
+uploads anything, so an oversized scan is refused in a moment rather than after the
+upload. It declares the content type from the file's extension; the server checks that
+declaration rather than the bytes, so `--content-type` is how you send a file whose name
+does not match what it is.
+
+Neither command is retried after an ambiguous failure — a timeout, a dropped connection.
+Neither endpoint takes an idempotency key, so a second attempt is a second write: for a
+field that means a duplicate-label refusal, and for a document it means a second copy
+attached silently. Both say so when it happens, and tell you to check `fields list`
+before trying again.
+
 ## How it holds your token
 
 - `~/.config/dossier/credentials.toml`, mode `0600`, in a `0700` directory, written
@@ -164,7 +191,10 @@ with colour stripped, because a pipe strips it.
 
 - **Speak to anything but `/api/v1`.** No web routes, no cookies, no scraped HTML. That
   restriction is enforced in the transport, not left to discipline.
-- **Take a token as an argument.** Hidden prompt or stdin, nothing else.
+- **Take a token or a field's value as an argument.** Hidden prompt, stdin or a file;
+  nothing else. Both would otherwise land in your shell history and in `ps`.
+- **Retry a write it cannot account for.** Neither write endpoint takes an idempotency
+  key, so a blind retry is a second write rather than a repeat of the first.
 - **Decide anything the server decides.** Whether a share is live, expired or revoked, and
   whether a token is valid, are the server's answers; this client renders them and never
   computes its own.

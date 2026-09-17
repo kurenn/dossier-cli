@@ -1,0 +1,7 @@
+ID            118
+LABEL         CURP
+CATEGORY      identity
+COUNTRY       MEX
+SENSITIVITY   2
+STATUS        active
+HAS_DOCUMENT  false

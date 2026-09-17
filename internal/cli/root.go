@@ -64,6 +64,7 @@ func NewRoot(app *App) *cobra.Command {
 		newWhoamiCmd(app),
 		newProfilesCmd(app),
 		newFieldsCmd(app),
+		newDocumentsCmd(app),
 		newSharesCmd(app),
 	)
 

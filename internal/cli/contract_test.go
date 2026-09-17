@@ -349,38 +349,46 @@ func TestContractDefaultFieldListingIsActiveOnly(t *testing.T) {
 	data := contractFixture(t)
 	client := contractClient(t, data.Tokens["all"].Raw)
 
-	unfiltered := countFields(t, client, "")
+	// The claim, stated directly: nothing that is not active comes back from an
+	// unfiltered listing. Asserted over the rows' own statuses rather than by comparing a
+	// total to the fixture's, so a vault that has grown since it was seeded — which this
+	// suite's write tests guarantee — still tests the same thing.
+	for id, status := range listFieldStatuses(t, client, "") {
+		if status != "active" {
+			t.Errorf("the unfiltered listing returned field %d with status %q.\n\nIf the default changed to return everything, `fields list` needs to say so and this test's premise is gone.", id, status)
+		}
+	}
 
-	var active int
+	seeded := map[string][]int{}
 	for _, field := range data.Fields {
-		if field.Status == "active" {
-			active++
-		}
+		seeded[field.Status] = append(seeded[field.Status], field.ID)
+	}
+	if len(seeded) < 2 {
+		t.Skip("the fixture only seeds one status, so there is no asymmetry to detect")
 	}
 
-	if unfiltered != active {
-		t.Errorf("the unfiltered listing returned %d fields; the fixture has %d active ones (of %d total).\n\nIf the default changed to return everything, `fields list` needs to say so and this test's premise is gone.",
-			unfiltered, active, len(data.Fields))
-	}
-	if len(data.Fields) == active {
-		t.Skip("the fixture only seeds active fields, so there is no asymmetry to detect")
-	}
-
-	// And each status is reachable when asked for by name, which is what --state will do.
-	for _, status := range liveSchema(t).FieldStatuses {
-		var expected int
-		for _, field := range data.Fields {
-			if field.Status == status {
-				expected++
+	// And each status is reachable when asked for by name, which is what --status does.
+	// By id, so the non-active rows are proven to still exist rather than merely to be
+	// counted — "withdrawn is still on file" is the half of the asymmetry that matters.
+	for status, ids := range seeded {
+		returned := listFieldStatuses(t, client, status)
+		for _, id := range ids {
+			if got, present := returned[id]; !present {
+				t.Errorf("status=%s did not return field %d, which the fixture seeded with that status", status, id)
+			} else if got != status {
+				t.Errorf("status=%s returned field %d with status %q", status, id, got)
 			}
-		}
-		if got := countFields(t, client, status); got != expected {
-			t.Errorf("status=%s returned %d fields, fixture has %d", status, got, expected)
 		}
 	}
 }
 
-func countFields(t *testing.T, client *api.Client, status string) int {
+// listFieldStatuses returns the id and status of every row one listing returns.
+//
+// Ids and statuses rather than a count, because the contract suite's own write tests add
+// fields to this vault: a count would make every assertion here depend on running before
+// them, which is an order dependency nothing declares and the next person to add a test
+// would not know about.
+func listFieldStatuses(t *testing.T, client *api.Client, status string) map[int]string {
 	t.Helper()
 
 	query := map[string]string{"limit": "200"}
@@ -390,13 +398,19 @@ func countFields(t *testing.T, client *api.Client, status string) int {
 
 	var body struct {
 		Fields []struct {
-			ID int `json:"id"`
+			ID     int    `json:"id"`
+			Status string `json:"status"`
 		} `json:"fields"`
 	}
 	if err := getJSON(t, client, api.Prefix+"/fields", query, &body); err != nil {
 		t.Fatalf("GET /fields (status=%q): %v", status, err)
 	}
-	return len(body.Fields)
+
+	rows := make(map[int]string, len(body.Fields))
+	for _, field := range body.Fields {
+		rows[field.ID] = field.Status
+	}
+	return rows
 }
 
 func getJSON(t *testing.T, client *api.Client, path string, query map[string]string, into any) error {
@@ -500,7 +514,7 @@ func TestContractProbesCreateNothing(t *testing.T) {
 	data := contractFixture(t)
 	client := contractClient(t, data.Tokens["all"].Raw)
 
-	fieldsBefore := countFields(t, client, "")
+	fieldsBefore := len(listFieldStatuses(t, client, ""))
 	sharesBefore := countShares(t, client)
 
 	// The full sweep, with the token that holds every scope — the case where each probe
@@ -514,7 +528,7 @@ func TestContractProbesCreateNothing(t *testing.T) {
 		})
 	}
 
-	if after := countFields(t, client, ""); after != fieldsBefore {
+	if after := len(listFieldStatuses(t, client, "")); after != fieldsBefore {
 		t.Errorf("a --probe sweep changed the field count from %d to %d", fieldsBefore, after)
 	}
 	if after := countShares(t, client); after != sharesBefore {
