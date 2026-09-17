@@ -17,10 +17,13 @@ ID  TOKEN      TITLE                 RECIPIENT       STATE     DEADLINE      OPE
 
 ## Status
 
-**Milestone 0.** The foundations are in place and usable: `version`, `schema`, `login`,
-`logout`, `whoami` and `profiles`. The commands that read and write vault data —
-`fields`, `documents`, `shares` and `open` — are not built yet, so the listing above is
-what the client is being built toward rather than what it does today.
+**Milestone 1.** The foundations plus the read commands: `version`, `schema`, `login`,
+`logout`, `whoami`, `profiles`, `fields list`, `shares list` and `shares show`.
+
+Writing is not built yet — `fields create`, `documents attach`, `shares mint` and `open`
+are still ahead — so the listing above is partly what the client is being built toward
+rather than what it does today. Nothing here can alter your vault or release anything from
+it; this milestone only reads.
 
 ## Install
 
@@ -63,6 +66,32 @@ printf %s "$TOKEN" | dossier login --token-stdin
 ```
 
 Or skip the file entirely and set `DOSSIER_TOKEN` in the environment.
+
+### Reading your vault
+
+```bash
+dossier fields list                  # what is on file, and nothing of what it says
+dossier fields list --status empty   # fields you created and have not filled
+dossier shares list                  # every dossier you have released
+dossier shares list --state expiring --all
+dossier shares show 88               # one dossier, with its audit trail
+```
+
+`fields list` prints metadata and never a value. The API returns none from that endpoint
+and the command has no column for one — a field's value reaches a screen only through the
+dossier you released it in.
+
+`shares list`'s deadline column shows how long a live dossier has left, and for one that
+has closed it shows the closing fact instead: the date it was revoked, or the timestamp its
+deadline arrived. It will not show a countdown on a link that no longer works, which is
+also why a revoked dossier never displays the expiry it was minted with.
+
+Both list commands page with a cursor and take `--all` to follow it to the end. `--json`
+gives you the API's response verbatim on stdout and nothing else, one document per page:
+
+```bash
+dossier shares list --all --json | jq -r '.shares[] | select(.state=="expiring") | .token'
+```
 
 Before you have a token at all, `dossier schema` works: it prints the API's own
 description of itself, which is also where this client reads every limit, scope and
@@ -108,8 +137,24 @@ than trying again. Check `dossier shares list` before acting.
 ## Output
 
 Human-readable by default, with data in labelled blocks and aligned tables that survive
-`grep`, `awk` and `sort`. `--json` passes the API's response body through byte-for-byte —
-no reshaping, no wrapper — so `jq` does the rest.
+`grep`, `awk` and `sort`:
+
+```
+ID  TOKEN      TITLE                       RECIPIENT              STATE     DEADLINE            OPENS  FIELDS
+88  K7M2P9QRX  Lease application           Marisol Vega           LIVE      5d 15h left         0      1
+87  Q2WXM9KRP  Bank KYC                    Tomás Herrera          EXPIRING  1h 07m left         2      3
+84  M3QX7KPR2  Standing employer record    —                      LIVE      No expiry           5      2
+83  W9KMR2PQX  Withdrawn background check  Priya Raman            REVOKED   Revoked 2026-09-14  1      4
+81  R7KPX2MQ9  —                           consulate@example.com  EXPIRED   2026-09-01T09:00Z   1      2
+```
+
+Column widths come from the page. An em dash is an empty cell. Identifiers and timestamps
+are printed exactly as the API sent them; the countdown is the one figure this client
+derives, and it appears in that column and nowhere else.
+
+`--json` passes the API's response body through byte-for-byte — no reshaping, no wrapper —
+so `jq` does the rest. Under `--all` it emits one document per page rather than merging
+them, because a merged page is a shape the API never produced.
 
 Colour appears only on a share's state word and its countdown, only when stdout is a
 terminal, and never when `NO_COLOR` is set or `TERM=dumb`. Every state reads correctly

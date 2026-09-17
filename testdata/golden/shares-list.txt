@@ -1,0 +1,6 @@
+ID  TOKEN      TITLE                       RECIPIENT              STATE     DEADLINE            OPENS  FIELDS
+88  K7M2P9QRX  Lease application           Marisol Vega           LIVE      5d 15h left         0      1
+87  Q2WXM9KRP  Bank KYC                    Tomás Herrera          EXPIRING  1h 07m left         2      3
+84  M3QX7KPR2  Standing employer record    —                      LIVE      No expiry           5      2
+83  W9KMR2PQX  Withdrawn background check  Priya Raman            REVOKED   Revoked 2026-09-14  1      4
+81  R7KPX2MQ9  —                           consulate@example.com  EXPIRED   2026-09-01T09:00Z   1      2

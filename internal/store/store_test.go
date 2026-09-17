@@ -259,6 +259,13 @@ func TestConfigRoundTripAndDefaults(t *testing.T) {
 
 // The precedence order from §5.3, each level asserted against the one below it.
 func TestResolvePrecedence(t *testing.T) {
+	// Cleared because DOSSIER_TOKEN sits at the top of the very order under test: a
+	// developer with one exported — which anyone testing the CLI against a real vault will
+	// have — would see the two subtests that assert a *stored* token fail with the token
+	// from their shell. The subtests that want one set it themselves.
+	t.Setenv("DOSSIER_TOKEN", "")
+	t.Setenv("DOSSIER_PROFILE", "")
+
 	creds := &Credentials{Profiles: map[string]Profile{
 		"default": {Host: "https://default.example", Token: "dsk_default"},
 		"work":    {Host: "https://work.example", Token: "dsk_work"},

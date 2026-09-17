@@ -1,0 +1,5 @@
+ID  LABEL                    CATEGORY    COUNTRY  SENSITIVITY  STATUS     HAS_DOCUMENT  DOCS
+9   Legal name (as printed)  identity    —        1            active     false         0
+12  U.S. Passport            travel      USA      3            active     true          2
+14  Provincial health card   health      CAN      2            withdrawn  false         0
+15  Employer reference       employment  —        1            empty      false         0
