@@ -136,6 +136,18 @@ gofmt -l . && go vet ./...     # formatting and vet
 go test ./internal/cli -update # rewrite the golden output files
 ```
 
+The suite above runs entirely against in-process fakes. There is a second one, behind a
+build tag, that runs against a real server and exists to check those fakes have not
+drifted from it:
+
+```bash
+go test -tags contract -run TestContract ./internal/cli
+```
+
+It needs `DOSSIER_CONTRACT_HOST` and a seeded fixture, and it runs on every push to the
+API's own repository rather than here. `CLAUDE.md` explains why that direction, and what a
+failure usually means.
+
 See `CLAUDE.md` for the full development loop.
 
 ## Licence

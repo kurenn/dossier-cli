@@ -331,6 +331,48 @@ func TestWhoamiProbeStopsOnADeadToken(t *testing.T) {
 	}
 }
 
+// The same argument as the test above, for the other non-answer. A sweep the rate limiter
+// refused determined nothing, so it must not exit 0 — found by the contract suite, which
+// unlike a fake can actually exhaust a real limiter.
+//
+// The verdicts still print: the probes that did run are real results, and the exit code
+// is what tells a caller the set is incomplete.
+func TestWhoamiProbeExitsTryLaterWhenRateLimited(t *testing.T) {
+	rateLimited := errorEnvelope(http.StatusTooManyRequests, "rate_limited",
+		"Too many requests.", "Wait a minute.")
+
+	server := fakeAPI(t, map[string]http.HandlerFunc{
+		"/api/v1/fields": func(w http.ResponseWriter, r *http.Request) {
+			// The read probe answers, so some of the sweep is real.
+			if r.Method == http.MethodGet {
+				jsonResponse(http.StatusOK, `{"data":[]}`)(w, r)
+				return
+			}
+			rateLimited(w, r)
+		},
+		"/api/v1/shares":             rateLimited,
+		"/api/v1/fields/0/documents": rateLimited,
+	})
+
+	h := newHarness(t)
+	h.seedProfile("default", store.Profile{Host: server.URL, Token: validToken})
+
+	code := h.run("whoami", "--probe", "--no-wait")
+
+	if code != exitcode.TryLater {
+		t.Fatalf("exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitcode.TryLater, h.stdout, h.stderr)
+	}
+	if out := h.stdout.String(); !strings.Contains(out, "fields:read       has") {
+		t.Errorf("the probe that did answer was not reported:\n%s", out)
+	}
+	if !strings.Contains(h.stdout.String(), verdictRateLimited) {
+		t.Errorf("the refused probes were not marked as unknown:\n%s", h.stdout)
+	}
+	if !strings.Contains(h.stderr.String(), "it is incomplete") {
+		t.Errorf("stderr does not say the sweep was incomplete:\n%s", h.stderr)
+	}
+}
+
 // The stated expiry is the holder's note, never presented as the cause of a 401 — the
 // CLI cannot know a token's real expiry and the stored date may simply be wrong.
 func TestUnauthenticatedMentionsAStatedExpiryAsAStatement(t *testing.T) {

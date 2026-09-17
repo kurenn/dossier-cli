@@ -19,7 +19,7 @@ EXPIRY
   REQUIRED    yes
   PRESETS     PT24H P7D P30D P90D
 
-  Presets are ISO 8601 durations, not timestamps.
+  Presets are ISO 8601 durations, not timestamps. Compute expires_at yourself: now + preset (e.g. now + "PT24H" = 24 hours from now), and send that timestamp.
 
   No expiry — This is the exception: the link works until you revoke it by hand.
 

@@ -3,12 +3,14 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/kurenn/dossier-cli/internal/api"
+	"github.com/kurenn/dossier-cli/internal/exitcode"
 	"github.com/kurenn/dossier-cli/internal/render"
 	"github.com/kurenn/dossier-cli/internal/store"
 	"github.com/spf13/cobra"
@@ -159,6 +161,7 @@ func (a *App) runProbe(ctx context.Context, resolution store.Resolution) error {
 	a.Println()
 	results := render.NewBlock(16)
 
+	var limited int
 	for _, probe := range scopeProbes() {
 		verdict, err := a.probeScope(ctx, client, probe)
 		if err != nil {
@@ -168,10 +171,41 @@ func (a *App) runProbe(ctx context.Context, resolution store.Resolution) error {
 			// exit 3, which is what a caller can actually act on.
 			return a.classify(err, resolution)
 		}
+		if strings.HasPrefix(verdict, verdictRateLimited) {
+			limited++
+		}
 		results.AddRaw(probe.scope, verdict)
 	}
-	return results.Render(a.Stdout)
+
+	if err := results.Render(a.Stdout); err != nil {
+		return err
+	}
+
+	// Same argument as the 401 above, one step further in. A probe the rate limiter
+	// refused did not determine anything, so a sweep that ends with unknowns has not
+	// answered the question it was asked — and exiting 0 would report that non-answer as
+	// a pass to the one caller that cannot read the word "unknown".
+	//
+	// The verdicts are printed first regardless: the ones that did run are real, and a
+	// holder debugging a token wants them. TryLater is the honest code because nothing
+	// here writes, so running it again in a minute is safe and sufficient.
+	if limited > 0 {
+		return &Error{
+			Code: exitcode.TryLater,
+			Message: fmt.Sprintf(
+				"\n%d of %d scopes could not be tested: the rate limiter refused the probe.\n\nNothing above is wrong, it is incomplete. Run this again in a minute.\n",
+				limited, len(scopeProbes()),
+			),
+		}
+	}
+	return nil
 }
+
+// verdictRateLimited prefixes the one verdict that is not an answer but a failure to ask.
+// runProbe counts these to decide the exit code, so the string is shared rather than
+// written twice — a rename that silently stopped matching would put the exit code back to
+// 0 with the output unchanged, which is the hardest version of this bug to notice.
+const verdictRateLimited = "unknown — rate limited"
 
 // probeScope returns "has", "lacks", or an honest description of why neither is known.
 //
@@ -210,7 +244,7 @@ func (a *App) probeScope(ctx context.Context, client *api.Client, probe scopePro
 	case "unauthenticated":
 		return "", apiErr
 	case "rate_limited":
-		return "unknown — rate limited, so the probe did not run", nil
+		return verdictRateLimited + ", so the probe did not run", nil
 	default:
 		return "unclear — " + apiErr.Code, nil
 	}
