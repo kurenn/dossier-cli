@@ -1,0 +1,25 @@
+ID         83
+TOKEN      W9KMR2PQX
+TITLE      Withdrawn background check
+RECIPIENT  Priya Raman
+EMAIL      priya@example.com
+STATE      REVOKED
+DEADLINE   Revoked 2026-09-14
+EXPIRES    2026-10-16T09:00:00Z
+REVOKED    2026-09-14T17:42:00Z
+OPENS      1
+FIELDS     4
+BATCH      d8b4e5f2-2a3c-4b6d-9e7f-4a8b3c5d6e7f
+
+AUDIT
+  2026-09-14T17:42:00Z  Revoked
+                        The holder killed it early. It stopped working instantly.
+                        Killed from the shares list
+
+  2026-09-13T08:15:00Z  Opened
+                        The dossier was rendered for the recipient.
+
+  2026-09-12T11:00:00Z  Issued
+                        The dossier was sealed and the link created.
+                        4 fields released to Priya Raman
+

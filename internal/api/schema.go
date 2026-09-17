@@ -41,7 +41,16 @@ type Endpoint struct {
 	Path          string   `json:"path"`
 	Scope         string   `json:"scope"`
 	RequestParams []string `json:"request_params"`
-	ResponseKeys  []string `json:"response_keys"`
+
+	// ResponseFields is the keys the API says this endpoint returns, dotted and with
+	// `[]` for an array — "shares[].revoked_at". Not every endpoint publishes them.
+	//
+	// The tag was `response_keys` until the contract suite asked for the values and got
+	// an empty slice for every endpoint. Nothing read the field, so nothing was broken;
+	// it was a name invented from memory rather than read off the server, which is the
+	// same class of mistake the whole contract suite exists to catch, in the one struct
+	// that describes the server's self-description.
+	ResponseFields []string `json:"response_fields"`
 }
 
 // ErrorCode is one row of the error table.

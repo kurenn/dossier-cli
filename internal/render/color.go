@@ -63,6 +63,18 @@ func NewColors(out io.Writer, forceOff bool) Colors {
 // Enabled reports whether colour will be emitted.
 func (c Colors) Enabled() bool { return c.enabled }
 
+// ColorsEnabled builds a colour decision directly, bypassing detection.
+//
+// This exists for tests, and nothing in the command tree reaches it from a flag. Terminal
+// detection type-asserts to *os.File, so a test handed a buffer can only ever get the
+// no-colour answer — which would leave the colour path, and the column alignment that
+// depends on discounting invisible bytes, checked by nothing.
+//
+// It is emphatically not a --color=always. §7.2 rejected that: forcing colour into a pipe
+// serves nothing this product needs, and every state is required to be complete as text
+// before colour is applied, so a pipe losing colour loses nothing.
+func ColorsEnabled(on bool) Colors { return Colors{enabled: on} }
+
 // StateWord renders a state as the upper-case word the web pill shows, colourised only
 // when colour is on.
 //

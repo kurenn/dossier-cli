@@ -59,7 +59,7 @@ These are inherited from the product and are cheap to break by accident.
 | `internal/cli/` | Command tree, the `App` context, error-to-exit classification |
 | `internal/api/` | HTTP transport, the error envelope, the schema document |
 | `internal/store/` | XDG paths, `config.toml`, `credentials.toml`, the schema cache |
-| `internal/render/` | Label-column blocks, colour detection, state words |
+| `internal/render/` | Label-column blocks, aligned tables, colour detection, state words, the deadline/countdown format |
 | `internal/exitcode/` | The exit-code contract |
 | `testdata/golden/` | Byte-exact expected output |
 
@@ -109,20 +109,18 @@ thing. The CI gate uses `-coverpkg=./...` for that reason.
   roots in a temp dir, and a fake API that **fails the test if anything outside
   `/api/v1` is requested**.
 - `App.IsInteractive` is injected so the prompting paths are testable without a pty.
-  Production leaves it nil and gets the real terminal check.
+  Production leaves it nil and gets the real terminal check. `App.ForceColor` is the same
+  trick for stdout: colour detection type-asserts to `*os.File`, so a test handed a buffer
+  can only ever get the no-colour answer, and the coloured path — including the column
+  padding that has to discount invisible SGR bytes — would be checked by nothing.
+  `--no-color` still wins over it.
 - Golden files are regenerated with `-update`. Read the diff rather than accepting it:
   a golden file will happily record a misalignment bug as correct, and did once already.
 
-## Not yet built
-
-Milestone 0 is done: `version`, `schema`, `login`, `logout`, `whoami`, `profiles`, the
-transport, the stores and CI. Still to come, in the plan's order — `fields list/create`,
-`documents attach`, `shares list/show`, `shares mint` with the idempotency ledger,
-`open`, and shell completion.
-
 ## The contract suite
 
-`internal/cli/contract_test.go`, behind `//go:build contract`. It is the only test here
+`internal/cli/contract_test.go` and `internal/cli/contract_reads_test.go`, behind
+`//go:build contract`. They are the only tests here
 that needs a real Dossier on a socket, and its job is not to test the CLI again — it is to
 **arbitrate the fakes**. `schemaFixture` and the `httptest` handlers were written from
 `docs/api.md`, so they agree with the client by construction, including where both are
@@ -150,16 +148,48 @@ Two consequences worth knowing:
 - The suite's test order is load-bearing and nothing in it runs in parallel. The last
   test deliberately exhausts the per-IP failed-authentication limiter, so a re-run within
   a minute fails on purpose, with a message saying so.
+- Owner reads are limited to **60/min per token** and the limiter is live here, because the
+  test environment's cache store is a memory store. The M1 tests therefore read through the
+  single-scope tokens rather than putting everything on `all` — three tokens is three
+  budgets — and the cursor walk covers one state, not four, because the walk costs a
+  request per share in the vault regardless of the filter. Adding tests that all read
+  through `all` is how this suite starts failing on a fast machine.
 
 It found one real bug on its first run: `whoami --probe` printed "unknown — rate limited"
 for every scope and exited 0, reporting a sweep that determined nothing as a pass. That is
 the same defect that had already been fixed for dead tokens, in the one case no fake could
 reach.
 
+M1 added `TestContractResponseFieldsAreAllDecoded`, which is the generalisation of the bug
+that started that milestone: the schema publishes `response_fields` per endpoint, and the
+test asserts the CLI has somewhere to put every key the server says it returns. It is
+one-directional on purpose — modelling a key the schema does not advertise is fine, being
+blind to one it does is not, and that is the direction drift travels. Writing it
+immediately found that `api.Endpoint` had tagged that very field `response_keys`, so it had
+been decoding to an empty slice since M0; nothing read it, so nothing was broken, but the
+struct describing the server's self-description was itself written from memory.
+
 ## Not yet built
 
-Still to come, in the plan's order — `fields list/create`, `documents attach`,
-`shares list/show`, `shares mint` with the idempotency ledger, `open`, and shell
-completion. Each milestone extends the contract suite: §9.1 also asks for a real mint,
-list, show and open round-trip, and for a burn share to refuse a second `open --document`,
-none of which can be written before the commands exist.
+Milestones 0 and 1 are done: the transport, the stores, CI, `version`, `schema`, `login`,
+`logout`, `whoami`, `profiles`, and the reads — `fields list`, `shares list`,
+`shares show`, with cursor pagination, `--all`, the schema-validated `--status`/`--state`
+filters, `--json`, and the table and deadline rendering of §7.1–7.4.
+
+Still to come, in the plan's order — `fields create`, `documents attach`, `shares mint`
+with the idempotency ledger, `open`, and shell completion. Each milestone extends the
+contract suite: §9.1 also asks for a real mint and open round-trip, and for a burn share to
+refuse a second `open --document`, none of which can be written before the commands exist.
+
+Two things M1 found and left behind, both in the plan's §12:
+
+- **`revoked_at` was not serialized** (gap 14, now closed). The deadline column has to show
+  a closed share's closing fact, and revoking does not touch `expires_at` — so a revoked
+  share keeps whatever future expiry it was minted with, and a client reading only
+  `expires_at` reports weeks left on a dead link. It is now sent, and
+  `TestContractEveryRevokedShareCarriesARevokedAt` asserts both halves.
+- **`burn_after_read` is write-only** (gap 15, open). The mint endpoint accepts it and no
+  read reports it, so neither `shares list` nor `shares show` can say that the live dossier
+  in front of you dies on first read. Not worked around, because there is nothing to work
+  around with: a derived column cannot invent a fact the response does not carry. Not
+  CLI-specific either — the web surfaces it on the mint form and nowhere else.

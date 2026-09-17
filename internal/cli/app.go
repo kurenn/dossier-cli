@@ -37,6 +37,11 @@ type App struct {
 	// gets the real check; tests set it to drive the prompting paths without a pty.
 	IsInteractive func() bool
 
+	// ForceColor overrides the terminal check on stdout, for the same reason and with the
+	// same rule: production leaves it nil. --no-color still wins over it, so the only
+	// thing it can do is turn colour on for a test that is asserting the coloured output.
+	ForceColor func() bool
+
 	// Global flags, bound in root.go.
 	ProfileFlag string
 	HostFlag    string
@@ -177,8 +182,17 @@ func (a *App) Client(resolution store.Resolution) (*api.Client, error) {
 }
 
 // Colors builds the colour decision for stdout.
+//
+// --no-color is checked first and wins outright, so an override cannot resurrect colour a
+// holder asked not to have.
 func (a *App) Colors() render.Colors {
-	return render.NewColors(a.Stdout, a.NoColor)
+	if a.NoColor {
+		return render.ColorsEnabled(false)
+	}
+	if a.ForceColor != nil {
+		return render.ColorsEnabled(a.ForceColor())
+	}
+	return render.NewColors(a.Stdout, false)
 }
 
 // Printf writes data to stdout.

@@ -63,6 +63,8 @@ func NewRoot(app *App) *cobra.Command {
 		newLogoutCmd(app),
 		newWhoamiCmd(app),
 		newProfilesCmd(app),
+		newFieldsCmd(app),
+		newSharesCmd(app),
 	)
 
 	return root
