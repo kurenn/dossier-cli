@@ -31,8 +31,10 @@ These are inherited from the product and are cheap to break by accident.
 3. **The schema is the source for every number and vocabulary.** Scopes, limits, filter
    values, expiry presets: read from `GET /api/v1/schema`, cached 24h. A literal list of
    scopes or statuses in this codebase is a defect, not a shortcut.
-4. **A token never touches argv.** Hidden prompt or `--token-stdin`. `--token` exists
-   only to be refused with the reason. Shell history and `ps` are why.
+4. **A secret never touches argv.** A token: hidden prompt or `--token-stdin`. A field's
+   value: hidden prompt, `--value-stdin` or `--value-file`. `--token` and `--value` both
+   exist only to be refused with the reason, and `fields create` refuses a positional
+   argument the same way. Shell history and `ps` are why.
 5. **`0600` is a refusal, not a warning.** A credentials file readable by anyone else
    stops the command with exit 2 and the `chmod` to run. There is no degraded mode: a
    warning in a cron job is a line nobody reads, and the credential is exposed either way.
@@ -60,6 +62,7 @@ These are inherited from the product and are cheap to break by accident.
 | `internal/api/` | HTTP transport, the error envelope, the schema document |
 | `internal/store/` | XDG paths, `config.toml`, `credentials.toml`, the schema cache |
 | `internal/render/` | Label-column blocks, aligned tables, colour detection, state words, the deadline/countdown format |
+| `internal/api/writes.go` | `POST /fields` and the multipart upload, including why the part declares its own content type |
 | `internal/exitcode/` | The exit-code contract |
 | `testdata/golden/` | Byte-exact expected output |
 
@@ -171,13 +174,14 @@ struct describing the server's self-description was itself written from memory.
 
 ## Not yet built
 
-Milestones 0 and 1 are done: the transport, the stores, CI, `version`, `schema`, `login`,
-`logout`, `whoami`, `profiles`, and the reads — `fields list`, `shares list`,
+Milestones 0, 1 and 2 are done: the transport, the stores, CI, `version`, `schema`,
+`login`, `logout`, `whoami`, `profiles`, the reads — `fields list`, `shares list`,
 `shares show`, with cursor pagination, `--all`, the schema-validated `--status`/`--state`
-filters, `--json`, and the table and deadline rendering of §7.1–7.4.
+filters, `--json`, and the table and deadline rendering of §7.1–7.4 — and the vault
+writes, `fields create` and `documents attach`.
 
-Still to come, in the plan's order — `fields create`, `documents attach`, `shares mint`
-with the idempotency ledger, `open`, and shell completion. Each milestone extends the
+Still to come, in the plan's order — `shares mint` with the idempotency ledger, `open`,
+and shell completion. Each milestone extends the
 contract suite: §9.1 also asks for a real mint and open round-trip, and for a burn share to
 refuse a second `open --document`, none of which can be written before the commands exist.
 
@@ -193,3 +197,43 @@ Two things M1 found and left behind, both in the plan's §12:
   in front of you dies on first read. Not worked around, because there is nothing to work
   around with: a derived column cannot invent a fact the response does not carry. Not
   CLI-specific either — the web surfaces it on the mint form and nowhere else.
+
+### What M2 turned on
+
+The two write endpoints take **no `Idempotency-Key`** — keys in this API are mint-only —
+and that single fact shapes both commands more than anything in §7.
+
+`Client.Do` already retried nothing but a 429, which is safe because the limiter refuses
+before the handler runs. What M2 added is the part a transport cannot know: after an
+ambiguous failure, `classifyWrite` tells the holder the request was *not* retried and
+what to check. The asymmetry is worth keeping in mind — a retried `fields create` fails
+loudly with the duplicate-label 422, but a retried `documents attach` **succeeds**, and
+silently attaches a second copy, because that endpoint is purely additive and nothing
+deduplicates it. It is the one place in this API where retrying is worse than giving up.
+`TestWritesAreSentExactlyOnceWhenTheServerNeverAnswers` counts requests against a server
+that never replies, for both.
+
+Two smaller things the endpoints dictate:
+
+- **The multipart part declares its own content type.** `multipart.CreateFormFile` writes
+  `application/octet-stream`, and the API allow-lists on the *declared* type rather than
+  sniffing bytes — so using the stdlib helper would make every upload a guaranteed 415.
+  `internal/api/writes.go` builds the part by hand for that one reason.
+- **The extension map is not the allow-list.** The schema does not publish the accepted
+  types (the plan's gap 5), so the CLI cannot pre-check them and does not try; the map in
+  `attach.go` only guesses a declaration from an extension, an unknown extension is a
+  refusal that points at `--content-type`, and the server decides. The size cap *is*
+  published, so that one is checked locally and the refusal quotes both numbers.
+
+M2 also found two things in the repositories rather than the API:
+
+- **`TestContractDefaultFieldListingIsActiveOnly` counted rows against the fixture**, so
+  it broke the moment anything in the suite created a field. It passed in CI only because
+  Go runs files alphabetically and `contract_writes_test.go` sorts last — an order
+  dependency nothing declared. It now asserts its actual claim (no non-active row comes
+  back unfiltered, and every seeded field is reachable under its own status), by id, which
+  is immune to a vault that has grown.
+- **Cobra reads the first backquoted word in a flag's usage string as the argument
+  placeholder.** `"(see \`dossier schema\`)"` rendered as `--status dossier schema`
+  instead of `--status string`. Shipped in M1 and unnoticed; flag usage strings now carry
+  no backticks.

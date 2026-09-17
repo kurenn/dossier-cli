@@ -18,7 +18,7 @@ func newFieldsCmd(app *App) *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(newFieldsListCmd(app))
+	cmd.AddCommand(newFieldsListCmd(app), newFieldsCreateCmd(app))
 	return cmd
 }
 
@@ -41,8 +41,8 @@ func newFieldsListCmd(app *App) *cobra.Command {
 			return app.runFieldsList(cmd.Context(), opts)
 		},
 	}
-	cmd.Flags().StringVar(&opts.filter, "status", "", "Only fields with this status (see `dossier schema`)")
-	cmd.Flags().IntVar(&opts.limit, "limit", 0, "Rows per page (the API's default is 25, its maximum 100)")
+	cmd.Flags().StringVar(&opts.filter, "status", "", "Only fields with this status (see: dossier schema)")
+	cmd.Flags().IntVar(&opts.limit, "limit", 0, "Rows per page; the API's default and maximum are in: dossier schema")
 	cmd.Flags().BoolVar(&opts.all, "all", false, "Follow pagination to the end")
 	return cmd
 }
@@ -72,7 +72,7 @@ func (a *App) runFieldsList(ctx context.Context, opts listOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := validateFilter("status", opts.filter, schema.FieldStatuses); err != nil {
+	if err := validateVocabulary("status", opts.filter, schema.FieldStatuses); err != nil {
 		return err
 	}
 

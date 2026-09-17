@@ -14,8 +14,8 @@ type listOptions struct {
 	all    bool
 }
 
-// validateFilter checks a --status or --state value against the vocabulary the schema
-// publishes, and refuses before sending anything.
+// validateVocabulary checks a flag value against the vocabulary the schema publishes for
+// it — `--status`, `--state`, `--category` — and refuses before sending anything.
 //
 // The vocabulary is never a literal in this binary. That is the CLI's non-negotiable 2 and
 // the reason §3 gave for rejecting Ruby: a filter list baked into a release goes stale the
@@ -26,7 +26,7 @@ type listOptions struct {
 // Refusing locally rather than letting the API answer 422 is deliberate, and not just to
 // save a round trip: `dossier shares list --state lve` should say what the four states are,
 // and the schema is what knows them.
-func validateFilter(flagName, value string, allowed []string) error {
+func validateVocabulary(flagName, value string, allowed []string) error {
 	if value == "" || slices.Contains(allowed, value) {
 		return nil
 	}

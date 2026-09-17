@@ -79,6 +79,29 @@ type Expiry struct {
 	} `json:"no_expiry"`
 }
 
+// MaxFileBytes reads limits.uploads.max_file_bytes, the per-document cap.
+//
+// Limits stays a loose map because `dossier schema` prints whatever the server publishes
+// without needing to know its shape, and a typed struct would quietly stop printing any
+// limit added later. This is the one number a *command* has to act on — the local size
+// check before an upload — so it is the one with a typed reader, and the second return
+// says "the server did not publish it" rather than handing back a zero that would refuse
+// every file.
+//
+// Through float64 because that is what encoding/json gives an untyped number. 25 MiB is
+// nowhere near the 2^53 where that would start losing integers.
+func (s *Schema) MaxFileBytes() (int64, bool) {
+	uploads, ok := s.Limits["uploads"].(map[string]any)
+	if !ok {
+		return 0, false
+	}
+	size, ok := uploads["max_file_bytes"].(float64)
+	if !ok || size <= 0 {
+		return 0, false
+	}
+	return int64(size), true
+}
+
 // ErrorCodeStrings returns just the codes, for exitcode.Unmapped.
 func (s *Schema) ErrorCodeStrings() []string {
 	codes := make([]string, 0, len(s.ErrorCodes))
