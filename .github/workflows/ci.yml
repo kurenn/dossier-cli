@@ -48,6 +48,14 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      # The contract suite is excluded from every step above by its build tag, because it
+      # needs a live server this runner has none of — it runs in the API's repository.
+      # Vetting it with the tag on is what stops it rotting: without this, a rename here
+      # would compile fine for months and then fail in *that* repository's CI, which is
+      # the worst place to discover it.
+      - name: go vet (contract suite)
+        run: go vet -tags contract ./...
+
       - name: staticcheck
         uses: dominikh/staticcheck-action@v1
         with:

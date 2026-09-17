@@ -174,9 +174,13 @@ func errorEnvelope(status int, code, message, hint string) http.HandlerFunc {
 	return jsonResponse(status, `{"error":{"code":"`+code+`","message":"`+message+`","hint":"`+hint+`"}}`)
 }
 
-// schemaFixture is a discovery document shaped like the real one. Derived from the
-// documented envelopes rather than invented, which is what makes the fakes worth having
-// until the contract job (§9.2) can arbitrate.
+// schemaFixture is a discovery document shaped like the real one.
+//
+// It is no longer taken on trust: contract_test.go asserts every closed vocabulary here
+// against a live server, so a fake that drifts from the API fails CI rather than quietly
+// certifying the wrong thing. The endpoint and error-code lists are deliberate subsets —
+// enough rows to render — and the contract suite checks those as subsets. Everything
+// else, including the expiry prose, is asserted verbatim.
 const schemaFixture = `{
   "endpoints": [
     {"method":"GET","path":"/api/v1/schema","scope":null},
@@ -199,7 +203,7 @@ const schemaFixture = `{
   "expiry": {
     "required": true,
     "presets": ["PT24H","P7D","P30D","P90D"],
-    "note": "Presets are ISO 8601 durations, not timestamps.",
+    "note": "Presets are ISO 8601 durations, not timestamps. Compute expires_at yourself: now + preset (e.g. now + \"PT24H\" = 24 hours from now), and send that timestamp.",
     "no_expiry": {"value": null, "label": "No expiry", "note": "This is the exception: the link works until you revoke it by hand."}
   }
 }`
