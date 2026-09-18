@@ -123,8 +123,12 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      # -v here and nowhere else. This job exists to prove that platform-specific code
+      # ran, and a passing package tells you tests ran, not which — a build tag typo
+      # would remove every Windows test from the binary and the package would still
+      # report ok. The named tests in the log are the evidence.
       - name: test (store)
-        run: go test ./internal/store/... -race
+        run: go test ./internal/store/... -race -v
 
       # The release ships a windows/amd64 binary; this is the cheapest possible proof
       # that it links and starts.
