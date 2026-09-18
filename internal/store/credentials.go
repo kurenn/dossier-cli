@@ -42,18 +42,44 @@ type Credentials struct {
 // owner. It is a distinct type because the command layer maps it to exit 2 — a refusal
 // before anything was sent — and because the remedy is a specific command the message
 // should name.
+//
+// Finding and Remedy are filled in by the platform, because the question "can anyone else
+// read this?" has two genuinely different answers. On Unix it is a mode and the fix is
+// chmod. On Windows there is no mode — Go synthesises one from the read-only attribute
+// and it says nothing about who can read the file — so the answer is in the DACL and the
+// fix is icacls. A single message would have had to be vague about both.
 type PermissionError struct {
 	Path string
-	Mode os.FileMode
+
+	// Finding states what is wrong, in the terms the operating system uses.
+	Finding string
+
+	// Remedy is the command that fixes it, ready to paste.
+	Remedy string
 }
 
 func (e *PermissionError) Error() string {
 	return fmt.Sprintf(
-		"%s is mode %04o, so other users on this machine can read your API token.\n"+
+		"%s\n"+
 			"dossier will not use a credentials file it cannot vouch for.\n\n"+
-			"Fix it with:\n\n    chmod 600 %s\n",
-		e.Path, e.Mode.Perm(), e.Path,
+			"Fix it with:\n\n    %s\n",
+		e.Finding, e.Remedy,
 	)
+}
+
+// CheckOwnerOnly reports whether path is readable only by the account running this
+// process, returning a *PermissionError describing the exposure if it is not.
+//
+// Exported as the counterpart to RestrictToOwner, so that anything writing something
+// private can assert the property it just asked for rather than assuming. On Unix that
+// assertion is a mode comparison and looks redundant; on Windows it is the only way to
+// know, because the mode there is synthetic and says nothing about access.
+func CheckOwnerOnly(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("could not inspect %s: %w", path, err)
+	}
+	return checkOwnerOnly(path, info)
 }
 
 // LoadCredentials reads the credentials file.
@@ -72,12 +98,13 @@ func LoadCredentials(p Paths) (*Credentials, error) {
 		return nil, fmt.Errorf("could not inspect %s: %w", path, err)
 	}
 
-	// The refusal. Any group or other bit set means the token is exposed to other users,
-	// and there is no degraded mode where the CLI carries on with a warning: a warning on
+	// The refusal. If anyone but the owner can read the file, the token is exposed, and
+	// there is no degraded mode where the CLI carries on with a warning: a warning on
 	// stderr in a cron job is a line nobody reads, and the credential is exposed either
-	// way.
-	if mode := info.Mode().Perm(); mode&0o077 != 0 {
-		return nil, &PermissionError{Path: path, Mode: mode}
+	// way. What "anyone but the owner" means is the platform's to answer — see
+	// permissions_unix.go and permissions_windows.go.
+	if err := checkOwnerOnly(path, info); err != nil {
+		return nil, err
 	}
 
 	var creds Credentials

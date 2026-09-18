@@ -3,6 +3,7 @@ package cli
 import (
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -568,6 +569,15 @@ func TestLogoutWarnsThatDOSSIERTOKENStillWins(t *testing.T) {
 // The refusal must reach every command that reads the file, not just whoami, and it must
 // be exit 2 — the CLI refused before sending anything.
 func TestAWorldReadableCredentialsFileIsRefusedEverywhere(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Exposing a file here means writing an Everyone ACE, not a chmod, and the
+		// remedy named is icacls rather than chmod 600. Both are covered by
+		// TestCheckOwnerOnlyNamesTheAccountThatCanRead in the store package, where the
+		// platform helpers live; what this test adds beyond that is the mapping to exit
+		// 2 across four commands, which is not platform-specific.
+		t.Skip("the exposure and the remedy are both platform-specific; see internal/store")
+	}
+
 	h := newHarness(t)
 	h.seedProfile("default", store.Profile{Host: "https://dossier.example", Token: validToken})
 

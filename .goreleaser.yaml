@@ -1,0 +1,167 @@
+# Release configuration. Run `goreleaser check` to validate it, and
+# `goreleaser release --snapshot --clean` to build everything without publishing.
+#
+# What a release has to be, for this particular binary: verifiable by someone who did not
+# build it. A CLI that holds a bearer token for an identity vault is a good thing to
+# tamper with, and "download this binary from the internet" is only an acceptable
+# instruction if the thing downloaded can be checked against something the project signed.
+# Hence checksums.txt, and hence the signature over it.
+version: 2
+
+project_name: dossier
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod verify
+
+    # Completions are generated from the binary that is about to ship, not written by
+    # hand, so they cannot drift from the command tree. `dossier completion` reads the
+    # tree at runtime; a checked-in script would be a snapshot of whatever it looked like
+    # the day someone remembered to regenerate it.
+    - rm -rf completions
+    - mkdir -p completions
+    - sh -c 'go run ./cmd/dossier completion bash > completions/dossier.bash'
+    - sh -c 'go run ./cmd/dossier completion zsh  > completions/dossier.zsh'
+    - sh -c 'go run ./cmd/dossier completion fish > completions/dossier.fish'
+
+builds:
+  - id: dossier
+    main: ./cmd/dossier
+    binary: dossier
+
+    # No cgo, so every target is a genuinely static binary and cross-compilation needs no
+    # toolchain per platform. §3 chose Go for the single-binary property; linking against
+    # a system libc would give most of it back.
+    env:
+      - CGO_ENABLED=0
+
+    flags:
+      # Build paths out of the binary. They leak the builder's directory layout and stop
+      # the output being reproducible.
+      - -trimpath
+
+    ldflags:
+      # main.version is the one build-time variable; see cmd/dossier/main.go, where the
+      # default is "dev" precisely so an unstamped binary admits it.
+      - -s -w -X main.version={{ .Version }}
+
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+    ignore:
+      # windows/arm64 is not in §10's list and nobody has asked. The Windows code in this
+      # repository — the credentials ACL — is architecture-independent, so adding it later
+      # costs a line here and no code.
+      - goos: windows
+        goarch: arm64
+
+    # Timestamps from the commit rather than the clock, so two builds of the same tag
+    # produce byte-identical archives and the checksums can be reproduced.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: dossier
+    ids: [dossier]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+    files:
+      - README.md
+      - LICENSE
+      - completions/*
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+# Keyless signing through Sigstore: the workflow's GitHub OIDC token is exchanged for a
+# short-lived certificate, the signature and certificate go into one bundle, and the whole
+# transaction is logged in Rekor's public transparency log.
+#
+# Keyless rather than GPG because there is no private key to store, rotate, leak or lose,
+# and because what a verifier actually wants to know is not "does this match a key
+# published somewhere" but "was this built by this repository's release workflow" — which
+# is exactly what the certificate identity asserts. A GPG key in a repository secret
+# proves only that whoever holds that secret signed it.
+#
+# Only the checksum file is signed. Every artifact's hash is in it, so one signature
+# covers all of them, and there is one thing for a verifier to check rather than eleven.
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    artifacts: checksum
+    args:
+      - sign-blob
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+
+# Casks, not formulas: `brews` generated a formula that installed a pre-compiled binary,
+# which Homebrew never really wanted, and GoReleaser made it a hard error in v2.16.
+#
+# The migration is a rename here and a real change in the tap — `Casks/dossier.rb` rather
+# than `Formula/dossier.rb`. No tap_migrations.json is needed, because there was never a
+# formula to migrate from: this is the first release.
+homebrew_casks:
+  - name: dossier
+
+    repository:
+      owner: kurenn
+      name: homebrew-tap
+      # A PAT, because a workflow's built-in GITHUB_TOKEN is scoped to the repository it
+      # runs in and cannot push to the tap.
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+
+    homepage: https://github.com/kurenn/dossier-cli
+    description: Command-line client for a Dossier vault's API
+    license: MIT
+
+    # The same three files the archive ships, installed where each shell looks for them,
+    # so `brew install` leaves completion working without a second instruction. They are
+    # paths within the archive, not commands — the generation already happened in the
+    # `before` hooks, against the binary being released.
+    completions:
+      bash: completions/dossier.bash
+      zsh: completions/dossier.zsh
+      fish: completions/dossier.fish
+
+    hooks:
+      post:
+        # These binaries are signed by Sigstore but not notarised by Apple, and Gatekeeper
+        # only recognises the latter. Without this, macOS quarantines the binary and the
+        # first run is a dialog telling the holder it cannot be opened — which reads as
+        # "this software is unsafe" rather than "this project has not paid Apple".
+        #
+        # Removing the attribute is what every Homebrew cask distributing an unsigned
+        # binary does. It is not weakening a check the holder had: they chose this tap
+        # explicitly, and the thing to verify against is the signed checksum.
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr",
+                           args: ["-dr", "com.apple.quarantine", "#{staged_path}/dossier"]
+          end
+
+release:
+  footer: |
+    ## Verifying this release
+
+    Every artifact's SHA-256 is in `checksums.txt`, and `checksums.txt` is signed by the
+    release workflow with [Sigstore](https://sigstore.dev) — no key to trust, just proof
+    that this repository's workflow produced it, recorded in a public transparency log.
+
+    ```sh
+    cosign verify-blob checksums.txt \
+      --bundle checksums.txt.sigstore.json \
+      --certificate-identity "https://github.com/kurenn/dossier-cli/.github/workflows/release.yml@refs/tags/{{ .Tag }}" \
+      --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+
+    sha256sum --ignore-missing -c checksums.txt
+    ```
+
+    The `--certificate-identity` is the part that matters. Checking the signature alone
+    tells you *someone* signed it; checking the identity tells you it was this workflow,
+    on this tag, in this repository.

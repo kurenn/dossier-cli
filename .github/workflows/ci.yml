@@ -99,6 +99,90 @@ jobs:
             exit 1
           fi
 
+  # Windows is a release target, and the only platform-specific code in the repository is
+  # the credentials ACL — the part that decides whether a token on disk is exposed.
+  #
+  # Cross-compiling it from the Linux job proves it type-checks, which is close to
+  # worthless for this particular code: every mistake it can make is a runtime one about
+  # SIDs and access masks, and `GOOS=windows go vet` would happily pass a check that
+  # refuses every file or accepts every file. It has to actually run somewhere.
+  #
+  # Only the store package, because that is where the platform code and its tests live.
+  # The rest of the suite is about the command surface, which is the same everywhere, and
+  # the two tests in it that do assert file permissions skip here and say why.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      # -v here and nowhere else. This job exists to prove that platform-specific code
+      # ran, and a passing package tells you tests ran, not which — a build tag typo
+      # would remove every Windows test from the binary and the package would still
+      # report ok. The named tests in the log are the evidence.
+      - name: test (store)
+        run: go test ./internal/store/... -race -v
+
+      # The release ships a windows/amd64 binary; this is the cheapest possible proof
+      # that it links and starts.
+      - name: smoke
+        run: |
+          go build -o dossier.exe ./cmd/dossier
+          ./dossier.exe version
+
+  # The release configuration, checked on every push rather than discovered at tag time.
+  #
+  # `goreleaser check` fails on deprecated keys, and GoReleaser turns soft deprecations
+  # into hard errors on a schedule of its own — `brews` went from a warning to a build
+  # failure in one minor version. Finding that here costs a red PR; finding it during a
+  # release means the tag is already pushed and the fix has to be re-tagged.
+  #
+  # The build is a snapshot with publishing and signing skipped, so it needs no secrets
+  # and no OIDC token, and it exercises the part most likely to break silently: whether
+  # all five targets actually cross-compile.
+  release-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check
+
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish,sign
+
+      # The binary that ships must carry the version it claims. `main.version` defaults
+      # to "dev", and a broken ldflags stanza produces a perfectly working release whose
+      # every binary reports "dev" — which is only discoverable by running one.
+      - name: the version stamp reached the binary
+        run: |
+          stamped="$(./dist/dossier_linux_amd64_v1/dossier version | awk '/^DOSSIER/ {print $2}')"
+          echo "Snapshot build reports: ${stamped}"
+          if [ "$stamped" = "dev" ] || [ -z "$stamped" ]; then
+            echo "The build did not stamp a version; check the ldflags in .goreleaser.yaml."
+            exit 1
+          fi
+
   vulncheck:
     runs-on: ubuntu-latest
     steps:

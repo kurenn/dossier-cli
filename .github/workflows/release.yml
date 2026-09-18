@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Nothing here is inferred. contents: write uploads the release; id-token: write is what
+# makes keyless signing possible, because the OIDC token this grants is the thing Sigstore
+# exchanges for a short-lived certificate. Without it the release still builds and then
+# fails at the signing step, which is the right way round: an unsigned release should not
+# be publishable by forgetting a line.
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # GoReleaser derives the changelog from the commits since the previous tag, and
+          # with a shallow clone there are none to derive it from.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The whole suite, on the exact commit being tagged. CI has already run it on the
+      # branch, but a tag can be pushed to any commit — including one that never had a
+      # green run — and a release is the last place to find that out.
+      - name: test
+        run: go test ./... -race
+
+      - uses: sigstore/cosign-installer@v4
+
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Scoped to kurenn/homebrew-tap, because the token above cannot push to another
+          # repository. If this secret is absent the run fails here, after the artifacts
+          # are built but before anything is published.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      # The signature is verified here, against the artifacts that were just published,
+      # using the same command the release notes tell a user to run.
+      #
+      # This exists because a signing step that silently produces something unverifiable
+      # is worse than no signing step: it puts a claim in the release notes that nobody
+      # checks until the day someone does. Signing configuration is also the part of a
+      # release pipeline most likely to break underneath you — cosign's v3 change to
+      # bundles rewrote these very flags — and this turns that from a discovery made by a
+      # user into a red build.
+      - name: verify the signature
+        run: |
+          cd dist
+          cosign verify-blob checksums.txt \
+            --bundle checksums.txt.sigstore.json \
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+
+      # And that the checksums themselves describe the artifacts that shipped. Signing a
+      # correct-looking file that lists the wrong hashes would pass the step above.
+      - name: verify the checksums
+        run: cd dist && sha256sum --ignore-missing -c checksums.txt

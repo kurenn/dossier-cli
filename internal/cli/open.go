@@ -17,6 +17,7 @@ import (
 	"github.com/kurenn/dossier-cli/internal/api"
 	"github.com/kurenn/dossier-cli/internal/exitcode"
 	"github.com/kurenn/dossier-cli/internal/render"
+	"github.com/kurenn/dossier-cli/internal/store"
 )
 
 // stdoutTarget is the --out value meaning "write the bytes to stdout".
@@ -287,9 +288,14 @@ func (a *App) downloadDocument(ctx context.Context, link *api.DocumentLink, opts
 		os.Remove(tempName)
 	}()
 
-	// 0600 from the start: this is an identity document, and the window between creating
-	// it world-readable and fixing it up is a window.
-	if err := temp.Chmod(0o600); err != nil {
+	// Locked down from the start: this is a scan of someone's passport, and the gap
+	// between creating it readable and fixing it up afterwards is a gap.
+	//
+	// store.RestrictToOwner rather than a bare Chmod, because a Chmod on Windows only
+	// toggles the read-only attribute and would leave the file carrying whatever ACL it
+	// inherited from the directory. Same call the credentials file uses, for the same
+	// reason.
+	if err := store.RestrictToOwner(tempName); err != nil {
 		return Unexpectedf("could not secure %s: %s\n", tempName, err)
 	}
 

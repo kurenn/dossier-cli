@@ -41,19 +41,10 @@ type Paths struct {
 	StateDir  string
 }
 
-// DefaultPaths resolves the XDG roots, falling back to the specification's own defaults.
-func DefaultPaths() (Paths, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return Paths{}, fmt.Errorf("could not find your home directory: %w", err)
-	}
-
-	return Paths{
-		ConfigDir: filepath.Join(xdgRoot("XDG_CONFIG_HOME", filepath.Join(home, ".config")), "dossier"),
-		CacheDir:  filepath.Join(xdgRoot("XDG_CACHE_HOME", filepath.Join(home, ".cache")), "dossier"),
-		StateDir:  filepath.Join(xdgRoot("XDG_STATE_HOME", filepath.Join(home, ".local", "state")), "dossier"),
-	}, nil
-}
+// DefaultPaths resolves where the three roots live on this machine. It is
+// platform-specific — see paths_unix.go and paths_windows.go — because XDG is a
+// specification for Unix desktops and Windows has its own, older answer that its users
+// and its backup software both already expect.
 
 // PathsIn puts all three roots under one directory. For tests, and for a caller that
 // wants everything in one place.
@@ -63,16 +54,6 @@ func PathsIn(root string) Paths {
 		CacheDir:  filepath.Join(root, "cache"),
 		StateDir:  filepath.Join(root, "state"),
 	}
-}
-
-// xdgRoot honours the variable only when it is an absolute path, which the XDG
-// specification requires. A relative value would put the credentials file somewhere
-// relative to whatever directory the CLI happened to be invoked from.
-func xdgRoot(env, fallback string) string {
-	if value := os.Getenv(env); filepath.IsAbs(value) {
-		return value
-	}
-	return fallback
 }
 
 func (p Paths) configFile() string      { return filepath.Join(p.ConfigDir, "config.toml") }
@@ -107,6 +88,11 @@ func ensureDir(path string, mode os.FileMode) error {
 			return fmt.Errorf("could not set %s to %o: %w", path, mode, err)
 		}
 	}
+	// On Windows the mode above is a fiction and this is the part that does the work;
+	// on Unix it is a no-op. See permissions_windows.go.
+	if mode&0o077 == 0 {
+		return RestrictToOwner(path)
+	}
 	return nil
 }
 
@@ -133,6 +119,15 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	if err := temp.Chmod(mode); err != nil {
 		cleanup()
 		return fmt.Errorf("could not set permissions on %s: %w", tempName, err)
+	}
+	// Applied to the temp file, before a byte is written and before the rename, so the
+	// secret is never on disk at permissions anyone else could use. A mode with group or
+	// other bits set is a file with nothing to protect — config.toml — and is left alone.
+	if mode&0o077 == 0 {
+		if err := RestrictToOwner(tempName); err != nil {
+			cleanup()
+			return err
+		}
 	}
 	if _, err := temp.Write(data); err != nil {
 		cleanup()

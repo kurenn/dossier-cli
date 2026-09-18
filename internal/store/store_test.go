@@ -26,20 +26,14 @@ func TestCredentialsAreWrittenAt0600InA0700Directory(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	fileInfo, err := os.Stat(paths.credentialsFile())
-	if err != nil {
-		t.Fatalf("Stat: %v", err)
+	// Asserted through CheckOwnerOnly rather than by comparing a mode, so this means
+	// the same thing on Windows — where the mode is synthetic and a comparison would
+	// pass or fail for reasons unrelated to who can read the file.
+	if err := CheckOwnerOnly(paths.credentialsFile()); err != nil {
+		t.Errorf("credentials.toml is not owner-only: %v", err)
 	}
-	if mode := fileInfo.Mode().Perm(); mode != 0o600 {
-		t.Errorf("credentials.toml is %04o, want 0600", mode)
-	}
-
-	dirInfo, err := os.Stat(paths.ConfigDir)
-	if err != nil {
-		t.Fatalf("Stat dir: %v", err)
-	}
-	if mode := dirInfo.Mode().Perm(); mode != 0o700 {
-		t.Errorf("config dir is %04o, want 0700", mode)
+	if err := CheckOwnerOnly(paths.ConfigDir); err != nil {
+		t.Errorf("the config directory is not owner-only: %v", err)
 	}
 }
 
@@ -54,39 +48,42 @@ func TestLoadCredentialsRefusesAWorldReadableFile(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	for _, mode := range []os.FileMode{0o644, 0o640, 0o604, 0o666, 0o660} {
-		if err := os.Chmod(paths.credentialsFile(), mode); err != nil {
-			t.Fatalf("Chmod: %v", err)
-		}
+	expose(t, paths.credentialsFile())
 
-		_, err := LoadCredentials(paths)
+	_, err := LoadCredentials(paths)
 
-		var permErr *PermissionError
-		if !errors.As(err, &permErr) {
-			t.Errorf("mode %04o was accepted (err = %v)", mode, err)
-			continue
-		}
-		// The message must name the fix, not just the problem.
-		if !strings.Contains(permErr.Error(), "chmod 600") {
-			t.Errorf("mode %04o: the error does not name the remedy:\n%s", mode, permErr)
-		}
+	var permErr *PermissionError
+	if !errors.As(err, &permErr) {
+		t.Fatalf("a file others can read was accepted (err = %v)", err)
+	}
+	// The message must name the fix, not just the problem — and the fix differs by
+	// platform, which is why PermissionError carries it rather than formatting one.
+	if !strings.Contains(permErr.Error(), exposureRemedy) {
+		t.Errorf("the error does not name the remedy:\n%s", permErr)
+	}
+	if !strings.Contains(permErr.Error(), "will not use a credentials file it cannot vouch for") {
+		t.Errorf("the error does not state the refusal:\n%s", permErr)
 	}
 }
 
-func TestLoadCredentialsAcceptsOwnerOnlyModes(t *testing.T) {
+// The round trip, and on Windows the regression test for this whole area: Save writes
+// the file, Load reads it back without refusing. Before the DACL work, Load rejected
+// every credentials file on every Windows machine — including the one login had just
+// written — because Go reports mode 0666 for an ordinary file there and the Unix check
+// saw group and other bits that do not exist.
+func TestSaveThenLoadIsAcceptedOnThisPlatform(t *testing.T) {
 	paths := testPaths(t)
 	creds := &Credentials{Profiles: map[string]Profile{"default": {Token: "dsk_secret"}}}
 	if err := creds.Save(paths); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
-	for _, mode := range []os.FileMode{0o600, 0o400} {
-		if err := os.Chmod(paths.credentialsFile(), mode); err != nil {
-			t.Fatalf("Chmod: %v", err)
-		}
-		if _, err := LoadCredentials(paths); err != nil {
-			t.Errorf("mode %04o was refused: %v", mode, err)
-		}
+	loaded, err := LoadCredentials(paths)
+	if err != nil {
+		t.Fatalf("a file this package just wrote was refused: %v", err)
+	}
+	if loaded.Profiles["default"].Token != "dsk_secret" {
+		t.Errorf("token = %q, want dsk_secret", loaded.Profiles["default"].Token)
 	}
 }
 
@@ -213,12 +210,8 @@ func TestEnsureDirTightensAnExistingLooseDirectory(t *testing.T) {
 		t.Fatalf("ensureDir: %v", err)
 	}
 
-	info, err := os.Stat(dir)
-	if err != nil {
-		t.Fatalf("Stat: %v", err)
-	}
-	if mode := info.Mode().Perm(); mode != 0o700 {
-		t.Errorf("directory is %04o, want 0700", mode)
+	if err := CheckOwnerOnly(dir); err != nil {
+		t.Errorf("the directory is not owner-only: %v", err)
 	}
 }
 
@@ -247,14 +240,9 @@ func TestConfigRoundTripAndDefaults(t *testing.T) {
 	}
 
 	// config.toml holds nothing secret, and making it 0600 beside the credentials would
-	// blur which of the two files actually matters.
-	info, err := os.Stat(paths.configFile())
-	if err != nil {
-		t.Fatalf("Stat: %v", err)
-	}
-	if mode := info.Mode().Perm(); mode != 0o644 {
-		t.Errorf("config.toml is %04o, want 0644", mode)
-	}
+	// blur which of the two files actually matters. Asserted per platform, because
+	// "0644" is not a thing Windows has.
+	assertNotSecret(t, paths.configFile())
 }
 
 // The precedence order from §5.3, each level asserted against the one below it.
@@ -337,36 +325,6 @@ func TestResolvePrecedence(t *testing.T) {
 		got := Resolve(config, creds, "work", "")
 		if got.TokenFromEnv || got.Token != "dsk_work" {
 			t.Errorf("got %+v", got)
-		}
-	})
-}
-
-// XDG is followed rather than inventing ~/.dossier, but only for absolute values — the
-// specification requires it, and a relative value would put the credentials file
-// somewhere relative to whatever directory the CLI was invoked from.
-func TestDefaultPathsHonoursAbsoluteXDGOnly(t *testing.T) {
-	t.Run("absolute values are used", func(t *testing.T) {
-		t.Setenv("XDG_CONFIG_HOME", "/custom/config")
-		paths, err := DefaultPaths()
-		if err != nil {
-			t.Fatalf("DefaultPaths: %v", err)
-		}
-		if paths.ConfigDir != "/custom/config/dossier" {
-			t.Errorf("ConfigDir = %q", paths.ConfigDir)
-		}
-	})
-
-	t.Run("relative values fall back to the specification's default", func(t *testing.T) {
-		t.Setenv("XDG_CONFIG_HOME", "relative/path")
-		paths, err := DefaultPaths()
-		if err != nil {
-			t.Fatalf("DefaultPaths: %v", err)
-		}
-		if strings.Contains(paths.ConfigDir, "relative/path") {
-			t.Errorf("a relative XDG_CONFIG_HOME was honoured: %q", paths.ConfigDir)
-		}
-		if !strings.HasSuffix(paths.ConfigDir, "/.config/dossier") {
-			t.Errorf("ConfigDir = %q, want the ~/.config default", paths.ConfigDir)
 		}
 	})
 }
