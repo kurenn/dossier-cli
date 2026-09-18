@@ -68,6 +68,7 @@ func NewRoot(app *App) *cobra.Command {
 		newFieldsCmd(app),
 		newDocumentsCmd(app),
 		newSharesCmd(app),
+		newOpenCmd(app),
 	)
 
 	return root

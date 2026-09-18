@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"io"
@@ -199,8 +200,20 @@ func jsonResponse(status int, body string) http.HandlerFunc {
 }
 
 // errorEnvelope writes an API error envelope.
+//
+// Marshalled rather than concatenated, which it used to be. The API's real hints contain
+// double quotes — `Check the "Retry-After" header (seconds) and back off.` is one — and
+// pasting one in produced invalid JSON that the client could not decode, so the envelope
+// arrived with an empty code and mapped to exit 1. The test that hit this looked like a
+// broken exit-code mapping and was a broken fixture.
 func errorEnvelope(status int, code, message, hint string) http.HandlerFunc {
-	return jsonResponse(status, `{"error":{"code":"`+code+`","message":"`+message+`","hint":"`+hint+`"}}`)
+	body, err := json.Marshal(map[string]any{
+		"error": map[string]string{"code": code, "message": message, "hint": hint},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return jsonResponse(status, string(body))
 }
 
 // schemaFixture is a discovery document shaped like the real one.

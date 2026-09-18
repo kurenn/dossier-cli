@@ -1,0 +1,17 @@
+TITLE        Lease application
+STATE        LIVE
+EXPIRES      2026-09-22T03:00:00Z
+HOLDER       Marisol Vega Ortiz
+NATIONALITY  MEX
+
+RELEASED
+Legal name (as printed)  VEGA ORTIZ, MARISOL
+Date of birth            1990-04-17
+U.S. Passport            X12345678  USA
+
+WITHHELD
+Social Security Number  ███████████
+
+DOCUMENTS
+ID  FILENAME           TYPE
+43  passport-scan.pdf  application/pdf

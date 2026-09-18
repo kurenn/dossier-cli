@@ -67,6 +67,8 @@ These are inherited from the product and are cheap to break by accident.
 | `internal/api/mint.go` | `POST /shares`: the body built once, its digest, and the 201 that is the only response carrying a raw PIN |
 | `internal/cli/mint.go` | The §6.3 retry table, `--resume`, and the handover block — the only screen that shows a secret once |
 | `internal/cli/expiry.go` | ISO 8601 durations, shorthands and timestamps, resolved client-side |
+| `internal/api/dossier.go` | The recipient boundary: the one-shot `view`, the document link, and `FetchSigned` — the only request not composed by this CLI |
+| `internal/cli/open.go` | `open` and `open --document`: the one-request rule, the PIN's two doors, the withheld bar |
 | `internal/exitcode/` | The exit-code contract |
 | `testdata/golden/` | Byte-exact expected output |
 
@@ -178,16 +180,15 @@ struct describing the server's self-description was itself written from memory.
 
 ## Not yet built
 
-Milestones 0 through 3 are done — the whole owner's side of the API. The transport, the
-stores, CI, `version`, `schema`, `login`, `logout`, `whoami`, `profiles`; the reads
-(`fields list`, `shares list`, `shares show`, with cursor pagination, `--all`, the
-schema-validated filters, `--json`, and the rendering of §7.1–7.4); the vault writes
-(`fields create`, `documents attach`); and the mint (`shares mint`, with the expiry
-picker, the local ledger, the §6.3 retry table, `--resume` and the handover block).
+Milestones 0 through 4 are done — both sides of the API. The transport, the stores, CI,
+`version`, `schema`, `login`, `logout`, `whoami`, `profiles`; the reads (`fields list`,
+`shares list`, `shares show`, with cursor pagination, `--all`, the schema-validated
+filters, `--json`, and the rendering of §7.1–7.4); the vault writes (`fields create`,
+`documents attach`); the mint (`shares mint`, with the expiry picker, the local ledger,
+the §6.3 retry table, `--resume` and the handover block); and the recipient side
+(`open`, `open --document`).
 
-Still to come, in the plan's order — `open` and the recipient side, then shell
-completion. §9.1's remaining ask is the open round-trip and a burn share refusing a second
-`open --document`, neither of which can be written before the command exists.
+Still to come: shell completion.
 
 Two things M1 found and left behind, both in the plan's §12:
 
@@ -362,3 +363,71 @@ server's number ever changes out from under this arithmetic.
   are the house style in every *other* string in this CLI, which is why this keeps
   happening — so `TestNoFlagUsageStringContainsABacktick` now walks the whole command tree
   and fails on any of them.
+
+### What M4 turned on
+
+`open` is the first command with no credential of its own, and the first where a *retry*
+is the dangerous operation rather than the safe one. Both facts changed the transport.
+
+**`api.Request.Once`.** A new per-request flag that forbids a second send for any reason,
+including the `429` this client retries everywhere else. It sits on the request rather
+than on the client because it is a property of the endpoint: `POST .../view` may have
+been the one open of a burn-after-read dossier, and a rate limit the CLI cannot
+distinguish from a late arrival is not grounds to find out. Expressed as client config it
+would have been one `api.New` call away from being lost.
+
+**`Once` cannot cover net/http's own replay, and does not have to.** M3 established that
+Go replays a POST on a reused idle connection only when it carries an idempotency header.
+`view` carries none, and `open` issues exactly one request per process so its connection
+is always fresh — two independent reasons the replay cannot fire.
+`TestViewCarriesNothingThatWouldMakeItReplayable` pins the first; every other test in
+`open_test.go` counts requests and so pins the second.
+
+**`--document` sends no `view` at all.** This is the sharp end of §8.2 and the easiest
+thing to get wrong by being helpful: a document id can only have come from an earlier
+open, so "look up the dossier to resolve the id" would spend a burn share in order to
+fetch a file from it. The command goes straight to the document endpoint. The contract
+test asserts the open count is unchanged afterwards, which is the only way to show it.
+
+**`FetchSigned` is deliberately not `Client.Do`.** `Do` refuses any path outside
+`/api/v1`, and that refusal is what makes "no web path" structural rather than careful. A
+signed URL is outside it by construction — Tigris in production, `/rails/active_storage/`
+under the test Disk service. Relaxing the check for every caller to admit the one request
+the CLI does not originate would trade the invariant for a convenience, so the download
+runs on a plain `http.Client` and the invariant is restated precisely: *every request the
+CLI composes is under `/api/v1`*. It sends no credential, because the capability is the
+URL and the host is not ours. `TestOpenDownloadsThroughASeparateTransport` serves the blob
+from a second `httptest` server, so `fakeAPI`'s "nothing outside /api/v1" assertion stays
+armed and the exception is demonstrated rather than excused.
+
+#### A single-use fixture needs a single owner
+
+The burn share can be opened once per seed. Written as two tests — one for the document
+refusal, one for the open — the second to run found a share the first had spent, and
+*which* failed depended on source order. They are now one test, `TestContractTheBurnDossier`,
+sequenced the way the product defines: refuse a document against a live share (proving it
+costs nothing), open it, then watch the second open be refused.
+
+That is M2's order-dependence learning a second time, and it also surfaced a latent
+instance of it. `TestContractAuditTrailCarriesRule9sPair` took *the first revoked share in
+the list*, which was fine until M4 created a second one by burning it — and a burn's trail
+carries `burned`, not `revoked`, so the test failed claiming a product rule had regressed.
+It now selects the fixture's revoked share by token. A contract test that says "the first
+row" is asserting something about ordering it does not mean to.
+
+#### A test helper that builds JSON by concatenation will eventually lie
+
+`errorEnvelope` interpolated its message and hint into a JSON string. The API's real hints
+contain double quotes — `Check the "Retry-After" header (seconds) and back off.` is one —
+so pasting a real hint in produced invalid JSON, the client could not decode the envelope,
+and the error arrived with an empty code that mapped to exit 1. The failure read as a
+broken exit-code mapping and was a broken fixture. It marshals now.
+
+#### Gap 17: the recipient boundary serves the holder API's `not_found` copy
+
+A `404` here renders a hint reading "Check the id and that it belongs to this token's
+account" to a caller who has neither a token nor an account. Rendered verbatim anyway, for
+the reason every other verbatim rule holds: a client that rewrites the server's copy
+becomes a second source of truth for it. The CLI adds its §8.3 line *beside* the hint, not
+instead of it, and `TestContractAnUnknownTokenStillCarriesTheHolderAPIsHint` logs a note
+the day the API fixes it.

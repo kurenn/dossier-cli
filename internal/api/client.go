@@ -143,11 +143,25 @@ type Request struct {
 	ContentType string
 	Headers     map[string]string
 
-	// Anonymous omits the Authorization header. Only GET /api/v1/schema uses it: a
-	// discovery document a client cannot read without already holding a credential
-	// teaches it nothing, so that endpoint takes no token — and sending one anyway would
-	// spend a unit of the failed-auth budget if the stored token happened to be dead.
+	// Anonymous omits the Authorization header. GET /api/v1/schema uses it — a discovery
+	// document a client cannot read without already holding a credential teaches it
+	// nothing, so that endpoint takes no token, and sending one anyway would spend a unit
+	// of the failed-auth budget if the stored token happened to be dead — and so does the
+	// whole recipient boundary, which is un-authenticated by design.
 	Anonymous bool
+
+	// Once forbids this request from being sent a second time for any reason, including
+	// the 429 the client would otherwise wait out. `POST /dossiers/:token/view` sets it:
+	// for a burn-after-read dossier that request may have been the one open, and a
+	// retry would return 410 having already spent it. §8.2's rule is "at most one per
+	// invocation, and never more than one", so it is expressed here, on the request,
+	// rather than left to whoever configures the client.
+	//
+	// This covers the retries this package performs. It cannot cover `net/http`'s own
+	// transport-level replay, which is why `POST .../view` being a POST with no
+	// idempotency header matters: Go replays only requests it considers replayable, and
+	// that is neither. TestViewIsNotReplayableByNetHTTP pins it.
+	Once bool
 
 	Timeout time.Duration
 }
@@ -198,7 +212,7 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 			return resp, nil
 		}
 
-		retryable := apiErr.Code == "rate_limited" && attempt < c.maxAttempts
+		retryable := apiErr.Code == "rate_limited" && attempt < c.maxAttempts && !req.Once
 		if !retryable {
 			return nil, apiErr
 		}

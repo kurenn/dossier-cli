@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"time"
 
 	"github.com/kurenn/dossier-cli/internal/api"
@@ -41,6 +42,13 @@ type App struct {
 	// IsInteractive overrides the terminal check on stdin. Production leaves it nil and
 	// gets the real check; tests set it to drive the prompting paths without a pty.
 	IsInteractive func() bool
+
+	// SignedURLClient fetches the download URL the API hands back from the document
+	// endpoint. Separate from api.Client on purpose: that one refuses every path outside
+	// /api/v1, which is the invariant §8.3 rests on, and a signed URL is outside it by
+	// construction — Tigris in production, /rails/active_storage/... under the test
+	// environment's Disk service. Production leaves this nil and gets a plain client.
+	SignedURLClient *http.Client
 
 	// ForceColor overrides the terminal check on stdout, for the same reason and with the
 	// same rule: production leaves it nil. --no-color still wins over it, so the only
