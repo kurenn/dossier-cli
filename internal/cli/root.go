@@ -48,7 +48,9 @@ func NewRoot(app *App) *cobra.Command {
 	})
 
 	flags := root.PersistentFlags()
-	flags.StringVar(&app.ProfileFlag, "profile", "", "Which stored credential to use (default: the `default` profile, or $DOSSIER_PROFILE)")
+	// See the note in login.go: a backticked word here becomes the argument placeholder,
+	// so this rendered as "--profile default".
+	flags.StringVar(&app.ProfileFlag, "profile", "", "Which stored credential to use (defaults to the profile named default, or $DOSSIER_PROFILE)")
 	flags.StringVar(&app.HostFlag, "host", "", "Override the profile's host, e.g. http://localhost:3000")
 	flags.BoolVar(&app.JSON, "json", false, "Print the API response body verbatim to stdout; errors as the API envelope to stderr")
 	flags.BoolVar(&app.NoColor, "no-color", false, "Force colour off (also: NO_COLOR set, TERM=dumb, or stdout not a terminal)")

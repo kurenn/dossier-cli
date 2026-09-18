@@ -1,0 +1,10 @@
+TITLE      Lease application
+TOKEN      K7M2P9QRX
+URL        https://dossier.global/d/k7m2p9qrx
+RECIPIENT  Marisol Vega  <marisol@example.com>
+STATE      LIVE
+EXPIRES    2026-09-21T09:00:00Z
+FIELDS     1
+EMAILED    address on file
+
+PIN        480 217          shown once

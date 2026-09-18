@@ -17,13 +17,12 @@ ID  TOKEN      TITLE                 RECIPIENT       STATE     DEADLINE      OPE
 
 ## Status
 
-**Milestone 2.** The foundations, the read commands, and the two that write to your
-vault: `version`, `schema`, `login`, `logout`, `whoami`, `profiles`, `fields list`,
-`shares list`, `shares show`, `fields create` and `documents attach`.
+**Milestone 3.** Everything on the owner's side of the API: `version`, `schema`,
+`login`, `logout`, `whoami`, `profiles`, `fields list`, `fields create`,
+`documents attach`, `shares list`, `shares show` and `shares mint`.
 
-Still ahead: `shares mint` and `open`. So nothing here can release anything from your
-vault or open a dossier as its recipient — this client can now add to a vault, but not
-share from one.
+Still ahead: `open`, the recipient side. So this client can hold a vault and release
+from one, but cannot yet open a dossier as the person it was sent to.
 
 ## Install
 
@@ -124,6 +123,69 @@ field that means a duplicate-label refusal, and for a document it means a second
 attached silently. Both say so when it happens, and tell you to check `fields list`
 before trying again.
 
+### Releasing a dossier
+
+```bash
+dossier shares mint --field 118 --to "Marisol Vega <marisol@example.com>" \
+  --title "Lease application" --expires 7d
+
+dossier shares mint --field 118 --to "Marisol Vega" --no-expiry   # the exception
+dossier shares mint --field 118 --field 119 \
+  --to "Marisol Vega <marisol@example.com>" \
+  --to "Tomas Ruiz" --expires P30D            # one batch, two dossiers
+```
+
+**An expiry is required.** Pass `--expires` or `--no-expiry`; there is no default and
+this command will not construct one. `--expires` takes an ISO 8601 duration (`PT24H`,
+`P7D`), a shorthand (`24h`, `7d`, `2w`) or an exact timestamp. A duration is added to the
+current time here, on your machine, and the computed deadline is what gets sent and
+printed back — so you confirm a date, not a sum.
+
+With neither flag, a terminal gets a picker and a script is refused with exit 2 before
+anything is sent. `--yes` skips the confirmation prompt; nothing skips the expiry.
+
+The reply is the only time the PIN exists in readable form. It is printed once, and
+`pin_digest` is bcrypt, so no route — this CLI, the API, or the web app — can produce it
+again:
+
+```
+Minted.
+
+TITLE      Lease application
+TOKEN      K7M2P9QRX
+URL        https://dossier.global/d/k7m2p9qrx
+RECIPIENT  Marisol Vega  <marisol@example.com>
+STATE      LIVE
+EXPIRES    2026-09-25T09:00:00Z
+FIELDS     1
+EMAILED    address on file
+
+PIN        480 217          shown once
+```
+
+`EMAILED` says whether an address was on file, not whether a message arrived — the API
+has no way to report the latter, so this never claims it did. With an address, that
+recipient has been sent the link *and* the PIN, and forwarding the PIN again by another
+channel only widens the exposure. With no address, this output is the only copy.
+
+#### When a mint fails
+
+Every attempt carries an idempotency key, written to a local ledger *before* the request
+goes out. If the connection drops or the server answers 500, the CLI cannot know whether
+the dossier was minted — so it keeps the key and tells you how to find out:
+
+```bash
+dossier shares mint --resume 3f7a1c2e-4b5d-4e6f-8a9b-0c1d2e3f4a5b
+```
+
+That resends the same bytes under the same key, which the API answers from its record of
+the first attempt. It cannot mint twice. A resume past 24 hours is refused, because the
+API holds its claim for exactly that long and a replay after it would be a fresh mint.
+
+Exit 11 is the one outcome where the CLI deliberately stops rather than retrying: the
+dossier may exist and cannot be confirmed. Check `dossier shares list` before minting
+again.
+
 ## How it holds your token
 
 - `~/.config/dossier/credentials.toml`, mode `0600`, in a `0700` directory, written
@@ -159,7 +221,12 @@ Every command ends on one of these, so a script can branch on `$?` without parsi
 
 Code 11 is the one worth reading twice. It means a mint was sent, the server failed
 mid-flight, the retry could not establish whether it landed, and *doing nothing* is safer
-than trying again. Check `dossier shares list` before acting.
+than trying again. Check `dossier shares list`, or finish the attempt with
+`dossier shares mint --resume <key>` — which asks the server about the same request
+rather than making a new one. What you must not do is mint again under a fresh key.
+
+Code 8 is its neighbour and its opposite: rate limited, or a claim still in flight.
+Nothing was written and repeating the command is safe.
 
 ## Output
 
@@ -191,17 +258,23 @@ with colour stripped, because a pipe strips it.
 
 - **Speak to anything but `/api/v1`.** No web routes, no cookies, no scraped HTML. That
   restriction is enforced in the transport, not left to discipline.
-- **Take a token or a field's value as an argument.** Hidden prompt, stdin or a file;
-  nothing else. Both would otherwise land in your shell history and in `ps`.
-- **Retry a write it cannot account for.** Neither write endpoint takes an idempotency
-  key, so a blind retry is a second write rather than a repeat of the first.
+- **Take a token, a field's value or a PIN as an argument.** Hidden prompt, stdin or a
+  file; nothing else. Any of them would otherwise land in your shell history and in `ps`.
+  A PIN is never in a URL either.
+- **Retry a write it cannot account for.** `fields create` and `documents attach` take
+  no idempotency key, so a blind retry is a second write rather than a repeat of the
+  first. A mint does take one, and is the only thing here that retries an unknown
+  outcome — under the same key, which is what makes it a question rather than a second
+  release.
 - **Decide anything the server decides.** Whether a share is live, expired or revoked, and
   whether a token is valid, are the server's answers; this client renders them and never
   computes its own.
 - **Mint, rotate or revoke a token.** It has no way to, and it is honest about that
   rather than implying otherwise.
 - **Default an expiry.** Every mint states a deadline or explicitly states that it has
-  none.
+  none. There is no flag, config key or environment variable that supplies one.
+- **Keep a PIN.** It is printed once and never written to disk — not to the ledger, not
+  to the schema cache, not to a profile.
 
 ## Contributing
 

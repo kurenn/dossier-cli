@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -161,6 +162,34 @@ func fakeAPI(t *testing.T, routes map[string]http.HandlerFunc) *httptest.Server 
 }
 
 // jsonResponse writes a status and body.
+// readAll drains a request body, failing the test rather than returning an error — a
+// handler that cannot read what it was sent has nothing useful left to assert.
+func readAll(t *testing.T, r *http.Request) []byte {
+	t.Helper()
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Fatalf("reading the request body: %v", err)
+	}
+	return body
+}
+
+// hijackAndClose takes the connection and drops it without a reply.
+//
+// This is the only way to produce the failure the mint ledger exists for: the request was
+// received in full, and the client will never learn what became of it. A 500 is a
+// different thing — the server answered.
+func hijackAndClose(t *testing.T, w http.ResponseWriter) {
+	t.Helper()
+
+	conn, _, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		t.Errorf("Hijack: %v", err)
+		return
+	}
+	_ = conn.Close()
+}
+
 func jsonResponse(status int, body string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -192,9 +221,10 @@ const schemaFixture = `{
   "field_statuses": ["empty","active","pending","withdrawn"],
   "share_states": ["live","expiring","expired","revoked"],
   "error_codes": [
-    {"code":"unauthenticated","status":401},
-    {"code":"insufficient_scope","status":403},
-    {"code":"rate_limited","status":429}
+    {"code":"unauthenticated","status":401,"message":"Missing or invalid API token.","hint":"Send \"Authorization: Bearer dsk_<token>\" with a token that is not expired or revoked."},
+    {"code":"insufficient_scope","status":403,"message":"This token does not have the scope this endpoint requires.","hint":"Mint a new token with the required scope from the Settings page — scopes are fixed at mint."},
+    {"code":"expiry_required","status":422,"message":"Expiry is required. Pass \"expires_at\" explicitly.","hint":"Pass an ISO 8601 timestamp, or an explicit null for the labelled no-expiry exception."},
+    {"code":"rate_limited","status":429,"message":"Too many requests.","hint":"Check the \"Retry-After\" header (seconds) and back off."}
   ],
   "limits": {
     "pagination": {"fields": {"default_limit": 50, "max_limit": 200}},

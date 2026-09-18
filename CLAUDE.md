@@ -61,8 +61,12 @@ These are inherited from the product and are cheap to break by accident.
 | `internal/cli/` | Command tree, the `App` context, error-to-exit classification |
 | `internal/api/` | HTTP transport, the error envelope, the schema document |
 | `internal/store/` | XDG paths, `config.toml`, `credentials.toml`, the schema cache |
+| `internal/store/ledger.go` | The mint ledger: one file per idempotency key under `StateDir`, and the 24 h staleness rule that matches the server's claim TTL |
 | `internal/render/` | Label-column blocks, aligned tables, colour detection, state words, the deadline/countdown format |
 | `internal/api/writes.go` | `POST /fields` and the multipart upload, including why the part declares its own content type |
+| `internal/api/mint.go` | `POST /shares`: the body built once, its digest, and the 201 that is the only response carrying a raw PIN |
+| `internal/cli/mint.go` | The §6.3 retry table, `--resume`, and the handover block — the only screen that shows a secret once |
+| `internal/cli/expiry.go` | ISO 8601 durations, shorthands and timestamps, resolved client-side |
 | `internal/exitcode/` | The exit-code contract |
 | `testdata/golden/` | Byte-exact expected output |
 
@@ -174,16 +178,16 @@ struct describing the server's self-description was itself written from memory.
 
 ## Not yet built
 
-Milestones 0, 1 and 2 are done: the transport, the stores, CI, `version`, `schema`,
-`login`, `logout`, `whoami`, `profiles`, the reads — `fields list`, `shares list`,
-`shares show`, with cursor pagination, `--all`, the schema-validated `--status`/`--state`
-filters, `--json`, and the table and deadline rendering of §7.1–7.4 — and the vault
-writes, `fields create` and `documents attach`.
+Milestones 0 through 3 are done — the whole owner's side of the API. The transport, the
+stores, CI, `version`, `schema`, `login`, `logout`, `whoami`, `profiles`; the reads
+(`fields list`, `shares list`, `shares show`, with cursor pagination, `--all`, the
+schema-validated filters, `--json`, and the rendering of §7.1–7.4); the vault writes
+(`fields create`, `documents attach`); and the mint (`shares mint`, with the expiry
+picker, the local ledger, the §6.3 retry table, `--resume` and the handover block).
 
-Still to come, in the plan's order — `shares mint` with the idempotency ledger, `open`,
-and shell completion. Each milestone extends the
-contract suite: §9.1 also asks for a real mint and open round-trip, and for a burn share to
-refuse a second `open --document`, none of which can be written before the commands exist.
+Still to come, in the plan's order — `open` and the recipient side, then shell
+completion. §9.1's remaining ask is the open round-trip and a burn share refusing a second
+`open --document`, neither of which can be written before the command exists.
 
 Two things M1 found and left behind, both in the plan's §12:
 
@@ -196,7 +200,11 @@ Two things M1 found and left behind, both in the plan's §12:
   read reports it, so neither `shares list` nor `shares show` can say that the live dossier
   in front of you dies on first read. Not worked around, because there is nothing to work
   around with: a derived column cannot invent a fact the response does not carry. Not
-  CLI-specific either — the web surfaces it on the mint form and nowhere else.
+  CLI-specific either — the web surfaces it on the mint form and nowhere else. M3 made this
+  sharper rather than resolving it: `shares mint --burn-after-read` can now *set* the flag,
+  and the 201 does not echo it, so the CLI writes a property it can never afterwards read
+  back. M4 will feel it worse — `open` must render the burn refusal, and cannot warn before
+  spending the one read it gets.
 
 ### What M2 turned on
 
@@ -237,3 +245,90 @@ M2 also found two things in the repositories rather than the API:
   placeholder.** `"(see \`dossier schema\`)"` rendered as `--status dossier schema`
   instead of `--status string`. Shipped in M1 and unnoticed; flag usage strings now carry
   no backticks.
+
+### What M3 turned on
+
+The mint is the only endpoint in this API that takes an `Idempotency-Key`, and it
+**requires** one. Everything structural about `shares mint` follows from that, plus one
+consequence of it that is easy to miss.
+
+**The body is built once.** `api.BuildMintBody` returns a byte slice, and that slice is
+what the ledger stores and what every attempt sends. The API's identity for a request is
+the key plus the *raw body*, so a retry that re-marshalled would risk a different byte
+sequence and earn `409 idempotency_key_reused` — which is permanent for that key.
+`encoding/json` is stable for a fixed struct and that is not the point: building once
+makes the client's digest and the server's agree by construction rather than by luck.
+`field_ids` are sent in the order given, unsorted and undeduped, for the same reason.
+
+**The ledger is written before the request, not after.** Its entire value is in the window
+between "sent" and "answered", and an entry created from a response would be missing for
+exactly the failures it exists to recover from. It lives under `StateDir`, never
+`CacheDir`, because something will eventually clear a cache and an unresolved mint must
+outlive that. It holds the key, the bytes, a SHA-256 of them, the host, and one more
+field:
+
+**`server_error_at` is what makes §6.3 decidable.** A `409 request_in_flight` means "wait
+and retry" normally, and means "the batch may have been written while its response could
+not be stored" after a 5xx. Same status, same body; the only thing that tells them apart
+is whether a 5xx was recorded under that key. So it is written to disk *before* the retry
+whose answer it interprets. Without it the CLI would back off 1s/2s/4s against a claim
+that can never resolve, then eventually mint a second dossier.
+
+**The mint owns its own 429 handling.** `mintClient` forces `WithNoWait(true)` at the
+transport level regardless of the `--no-wait` flag, so the 429 surfaces as an error rather
+than being slept on inside `Client.Do`. That is not a duplicate of the flag: §6.3 gives
+the mint its own bounded patience (three waits, capped at a minute each — sized for this
+endpoint's 10/min budget) and its own prose while it waits, and a transport that had
+already slept would make both unreachable.
+
+#### net/http replays a keyed POST, and only a keyed one
+
+Found while writing `TestMintResumeCompletesAnUnknownOutcome`, which kept passing with
+exit 0 when it should have failed. `Request.isReplayable` treats a POST as safe to resend
+on a *reused* idle connection that died before any response **if and only if** it carries
+an `Idempotency-Key` or `X-Idempotency-Key` header — the same signal, for the same reason,
+this API uses. The consequences are worth knowing rather than working around:
+
+- `shares mint` may be replayed under the hood. That replay carries the same key and the
+  same bytes, so it is exactly the retry §6.3 prescribes and cannot mint twice.
+- `fields create` and `documents attach` send no such header, so they are **never**
+  replayed. M2's exactly-once claim for two endpoints with no idempotency guard is
+  therefore structural, not a hope about connection reuse.
+
+`TestNetHTTPReplaysOnlyTheKeyedPost` pins both halves, because if a future Go relaxed the
+rule the second bullet would silently become false and a retried `fields create` would be
+a second field. It also means no test here can assert a request *count* during a dropped
+connection; the resume test flips a flag instead.
+
+#### The mint's contract tests, and the one done-when Go cannot reach
+
+The plan's M3 done-when ends "the PIN in the block matches the emailed one in the test
+mailer". Go cannot see Rails' mailer — another process's memory — and
+`spec/services/shares/mint_spec.rb` already asserts the emailed PIN is the minted one,
+where the mailer is visible. So `TestContractTheRenderedPINOpensTheDossier` asserts
+something stronger and within reach: the PIN **parsed back out of the rendered block**
+opens the dossier through `POST /api/v1/dossiers/:token/view`, and a rotated one does not.
+That closes the gap that matters — a correct PIN from the API is worth nothing if the
+renderer eats the space in `480 217`, and a holder reading a mangled PIN has no way to
+get another.
+
+The mint budget is **10/min per token**, the tightest in the API. Two seeded tokens hold
+`shares:mint` (`shares_mint` and `all`), and `contract_mint_test.go` splits across both to
+stay inside it — currently six requests each. That headroom is thin: a new mint test
+should pick the token with fewer, and `TestContractTheMintBudgetIsPublished` fails if the
+server's number ever changes out from under this arithmetic.
+
+#### Three smaller things
+
+- **The picker measures the exception's label with the presets.** "No expiry" is longer
+  than any of "24 hours", "7 days", "30 days", "90 days", and it sits in the same column —
+  so a width taken from the presets alone pushed the last row's note out of line.
+- **The handover's closing sentence is not hard-wrapped.** It embeds a recipient name, and
+  a name's width is not knowable, so a wrap that looks right for "Marisol Vega" is wrong
+  for a longer one. The terminal is better at this than a literal newline.
+- **The cobra backtick bug was still live in two flags.** M2 swept `fields` and `shares`
+  and believed it done; `login --name` and the root `--profile` still rendered as
+  `--name dossier profiles list` and `--profile default`. Backticks around a command name
+  are the house style in every *other* string in this CLI, which is why this keeps
+  happening — so `TestNoFlagUsageStringContainsABacktick` now walks the whole command tree
+  and fails on any of them.
