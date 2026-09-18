@@ -71,6 +71,9 @@ func NewRoot(app *App) *cobra.Command {
 		newOpenCmd(app),
 	)
 
+	// After AddCommand, because it looks the subcommands up by name.
+	registerCompletions(app, root)
+
 	return root
 }
 

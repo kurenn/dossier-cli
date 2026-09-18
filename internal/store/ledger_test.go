@@ -62,20 +62,11 @@ func TestLedgerFileAndDirectoryAreLockedDown(t *testing.T) {
 		t.Fatalf("SaveMint: %v", err)
 	}
 
-	info, err := os.Stat(filepath.Join(paths.StateDir, "mints", "a-key.json"))
-	if err != nil {
-		t.Fatalf("Stat: %v", err)
+	if err := CheckOwnerOnly(filepath.Join(paths.StateDir, "mints", "a-key.json")); err != nil {
+		t.Errorf("the ledger entry is not owner-only: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("file mode = %o, want 600", perm)
-	}
-
-	dir, err := os.Stat(filepath.Join(paths.StateDir, "mints"))
-	if err != nil {
-		t.Fatalf("Stat dir: %v", err)
-	}
-	if perm := dir.Mode().Perm(); perm != 0o700 {
-		t.Errorf("directory mode = %o, want 700", perm)
+	if err := CheckOwnerOnly(filepath.Join(paths.StateDir, "mints")); err != nil {
+		t.Errorf("the ledger directory is not owner-only: %v", err)
 	}
 }
 

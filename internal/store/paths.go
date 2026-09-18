@@ -107,6 +107,11 @@ func ensureDir(path string, mode os.FileMode) error {
 			return fmt.Errorf("could not set %s to %o: %w", path, mode, err)
 		}
 	}
+	// On Windows the mode above is a fiction and this is the part that does the work;
+	// on Unix it is a no-op. See permissions_windows.go.
+	if mode&0o077 == 0 {
+		return RestrictToOwner(path)
+	}
 	return nil
 }
 
@@ -133,6 +138,15 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	if err := temp.Chmod(mode); err != nil {
 		cleanup()
 		return fmt.Errorf("could not set permissions on %s: %w", tempName, err)
+	}
+	// Applied to the temp file, before a byte is written and before the rename, so the
+	// secret is never on disk at permissions anyone else could use. A mode with group or
+	// other bits set is a file with nothing to protect — config.toml — and is left alone.
+	if mode&0o077 == 0 {
+		if err := RestrictToOwner(tempName); err != nil {
+			cleanup()
+			return err
+		}
 	}
 	if _, err := temp.Write(data); err != nil {
 		cleanup()

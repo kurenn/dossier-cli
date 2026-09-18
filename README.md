@@ -17,20 +17,57 @@ ID  TOKEN      TITLE                 RECIPIENT       STATE     DEADLINE      BUR
 
 ## Status
 
-**Milestone 4.** Both sides of the API. The owner's: `version`, `schema`, `login`,
-`logout`, `whoami`, `profiles`, `fields list`, `fields create`, `documents attach`,
-`shares list`, `shares show` and `shares mint`. And the recipient's: `open`.
+**Milestone 5.** Both sides of the API, and a release you can verify. The owner's:
+`version`, `schema`, `login`, `logout`, `whoami`, `profiles`, `fields list`,
+`fields create`, `documents attach`, `shares list`, `shares show` and `shares mint`. And
+the recipient's: `open`.
 
 `open` is the odd one out, and deliberately. It needs no account, no token and no
 `login` — just the link you were given and the PIN that came with it.
 
 ## Install
 
+### Homebrew
+
+```bash
+brew install --cask kurenn/tap/dossier
+```
+
+Shell completion is installed with it.
+
+### A release binary
+
+Every [release](https://github.com/kurenn/dossier-cli/releases) carries a static binary
+for macOS (Apple silicon and Intel), Linux (`amd64` and `arm64`) and Windows (`amd64`),
+plus a `checksums.txt` and a signature over it.
+
+**Verify before you run it.** This is a client that will hold a bearer token for your
+identity vault, so "downloaded a binary from the internet" is only a reasonable thing to
+have done if you checked what you downloaded:
+
+```bash
+VERSION=v0.1.0
+cosign verify-blob checksums.txt \
+  --bundle checksums.txt.sigstore.json \
+  --certificate-identity "https://github.com/kurenn/dossier-cli/.github/workflows/release.yml@refs/tags/$VERSION" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+
+sha256sum --ignore-missing -c checksums.txt
+```
+
+The signing is [keyless](https://docs.sigstore.dev): there is no public key to fetch and
+trust, and no private key for this project to lose. The certificate says which workflow,
+in which repository, on which tag produced the artifacts, and the whole transaction is in
+a public transparency log. That is why `--certificate-identity` matters — without it you
+have only confirmed that *somebody* signed the file.
+
+### From source
+
 ```bash
 go install github.com/kurenn/dossier-cli/cmd/dossier@latest
 ```
 
-Or build from a checkout:
+Or from a checkout:
 
 ```bash
 git clone https://github.com/kurenn/dossier-cli
@@ -39,7 +76,25 @@ go build -o dossier ./cmd/dossier
 ```
 
 Requires Go 1.26.8 or later — earlier 1.26 patches carry known `crypto/tls` and
-`net/http` vulnerabilities on the path this client sends your token over. The result is a single static binary with no runtime.
+`net/http` vulnerabilities on the path this client sends your token over. The result is a
+single static binary with no runtime.
+
+### Shell completion
+
+Installed for you by Homebrew, and shipped in the release archives under `completions/`.
+To load it directly:
+
+```bash
+dossier completion bash > /etc/bash_completion.d/dossier
+dossier completion zsh  > "${fpath[1]}/_dossier"
+dossier completion fish > ~/.config/fish/completions/dossier.fish
+```
+
+**Completion makes no network requests.** It suggests subcommands and flags from the
+binary, profile names from your credentials file, and filter vocabularies from the
+cached schema — never by asking the API. Against this API a request is not free: it
+spends a published rate-limit budget, and on the recipient side it can consume a
+burn-after-read dossier. A tab press must not be able to do either.
 
 ## Getting started
 
@@ -268,6 +323,13 @@ the `404` cannot: the holder will have to send the file another way.
 - **It refuses to run if that file is readable by anyone else**, and tells you the
   `chmod` to fix it — the same posture `ssh` takes with a private key, for the same
   reason.
+- On Windows the file lives under `%APPDATA%\dossier\` and the question is asked of the
+  ACL rather than a mode, because Windows has no mode and the one Go reports is
+  synthetic: an ordinary private file comes back `0666`. `dossier` writes an explicit
+  access list granting your account and SYSTEM, refuses the file if anything else is
+  granted read, and names both the account and the `icacls` command that fixes it.
+  Administrators are permitted, for the same reason `0600` does not keep a secret from
+  root.
 - `~/.config/dossier/config.toml` holds your default profile. Nothing secret is in it.
 - `logout` forgets a token. It does **not** revoke it, cannot, and says so: only Settings
   can revoke.
@@ -357,6 +419,10 @@ with colour stripped, because a pipe strips it.
   per invocation and never retries it, not even the rate limit it would wait out
   anywhere else. A burn-after-read dossier is spent by its first open, and a retry to
   learn the outcome is the one action guaranteed to destroy the answer.
+- **Make a request because you pressed Tab.** Completion reads the binary, your
+  credentials file and the cached schema, and nothing else. A shell that quietly spent a
+  rate-limit unit — or opened a dossier — while you were still typing would be
+  indefensible, and invisible.
 - **Guess whether a dossier is burn-after-read.** There is nothing to ask before the
   open that would burn it, so the CLI does not pretend otherwise.
 

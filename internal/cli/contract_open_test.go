@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kurenn/dossier-cli/internal/store"
 	"os"
 	"path/filepath"
 	"slices"
@@ -257,12 +258,8 @@ func TestContractADocumentDownloadsAndMatches(t *testing.T) {
 	if !strings.HasPrefix(string(saved), "%PDF") {
 		t.Errorf("the downloaded bytes are not the fixture's document: %q", first64(saved))
 	}
-	info, err := os.Stat(out)
-	if err != nil {
-		t.Fatalf("Stat: %v", err)
-	}
-	if mode := info.Mode().Perm(); mode != 0o600 {
-		t.Errorf("mode = %04o, want 0600", mode)
+	if err := store.CheckOwnerOnly(out); err != nil {
+		t.Errorf("the downloaded document is not owner-only: %v", err)
 	}
 }
 

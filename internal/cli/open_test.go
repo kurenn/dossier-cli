@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"github.com/kurenn/dossier-cli/internal/store"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -342,13 +343,11 @@ func TestOpenDownloadsThroughASeparateTransport(t *testing.T) {
 		t.Errorf("saved %q, want %q", saved, payload)
 	}
 
-	info, err := os.Stat(out)
-	if err != nil {
-		t.Fatalf("Stat: %v", err)
-	}
-	// An identity document should not land world-readable, even briefly.
-	if mode := info.Mode().Perm(); mode != 0o600 {
-		t.Errorf("mode = %04o, want 0600", mode)
+	// An identity document should not land world-readable, even briefly. Asserted
+	// through the store's own check so it means the same thing on Windows, where a
+	// mode comparison would be comparing a number Go invented.
+	if err := store.CheckOwnerOnly(out); err != nil {
+		t.Errorf("the downloaded document is not owner-only: %v", err)
 	}
 }
 

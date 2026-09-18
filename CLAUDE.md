@@ -70,6 +70,11 @@ These are inherited from the product and are cheap to break by accident.
 | `internal/api/dossier.go` | The recipient boundary: the one-shot `view`, the document link, and `FetchSigned` — the only request not composed by this CLI |
 | `internal/cli/open.go` | `open` and `open --document`: the one-request rule, the PIN's two doors, the withheld bar |
 | `internal/exitcode/` | The exit-code contract |
+| `internal/cli/completion.go` | Shell completion, and the rule that none of it touches the network |
+| `internal/store/permissions_unix.go` | The mode check: what "only the owner can read this" means on Unix |
+| `internal/store/permissions_windows.go` | The DACL check and the ACL writer: the same question, where there is no mode to ask it of |
+| `.goreleaser.yaml` | Five targets, the checksum, the Sigstore signature over it, the Homebrew cask |
+| `.github/workflows/release.yml` | Tag push to published release, and the step that verifies its own signature |
 | `testdata/golden/` | Byte-exact expected output |
 
 ## Commands
@@ -180,15 +185,18 @@ struct describing the server's self-description was itself written from memory.
 
 ## Not yet built
 
-Milestones 0 through 4 are done — both sides of the API. The transport, the stores, CI,
+Milestones 0 through 5 are done. The transport, the stores, CI,
 `version`, `schema`, `login`, `logout`, `whoami`, `profiles`; the reads (`fields list`,
 `shares list`, `shares show`, with cursor pagination, `--all`, the schema-validated
 filters, `--json`, and the rendering of §7.1–7.4); the vault writes (`fields create`,
 `documents attach`); the mint (`shares mint`, with the expiry picker, the local ledger,
-the §6.3 retry table, `--resume` and the handover block); and the recipient side
-(`open`, `open --document`).
+the §6.3 retry table, `--resume` and the handover block); the recipient side
+(`open`, `open --document`); and distribution (five platforms, a signed checksum, a
+Homebrew cask, shell completion, and the Windows credentials ACL).
 
-Still to come: shell completion.
+Still to come: nothing on the plan's milestone list. The open items are the gaps in
+§12 of `docs/cli-plan.md`, which are mostly the API's to close, and the deferred
+keychain backend below.
 
 Two things M1 found and left behind, both in the plan's §12:
 
@@ -431,3 +439,86 @@ the reason every other verbatim rule holds: a client that rewrites the server's 
 becomes a second source of truth for it. The CLI adds its §8.3 line *beside* the hint, not
 instead of it, and `TestContractAnUnknownTokenStillCarriesTheHolderAPIsHint` logs a note
 the day the API fixes it.
+
+### What M5 turned on
+
+Distribution: `.goreleaser.yaml`, `.github/workflows/release.yml`, a `completion` command
+that is more careful than it looks, and the Windows credentials ACL.
+
+**The release verifies its own signature.** The workflow signs `checksums.txt` with cosign
+keyless, and then, in the next step, runs the exact `cosign verify-blob` command the
+release notes tell a user to run. A signing step that silently produces something
+unverifiable is worse than no signing step: it puts a claim in the release notes that
+nobody checks until the day somebody does. Signing configuration is also the most
+volatile part of a release pipeline — cosign v3 replaced `--output-signature` and
+`--output-certificate` with a single `--bundle`, rewriting these very flags — and this
+turns that from a user's discovery into a red build.
+
+**`goreleaser check` runs on every push, not at tag time.** GoReleaser promotes soft
+deprecations to hard errors on its own schedule; `brews` went from a warning to a build
+failure in one minor version, and the repositories that found out at tag time had already
+pushed the tag. CI also runs a full snapshot build, which is what proves all five targets
+still cross-compile, and asserts the version stamp reached the binary — a broken `ldflags`
+stanza produces a perfectly working release in which every binary reports `dev`.
+
+**Casks, not formulas.** `brews` is a hard error as of GoReleaser v2.16. The generated
+cask covers Linux as well as macOS, so nothing was lost in the move, and it installs the
+completions the archive already ships.
+
+#### Completion may not make a request
+
+Every completion source is local: the command tree from the binary, profile names from
+the credentials file, filter vocabularies from the *cached* schema with no fetch on a
+miss. This is not fussiness about latency. Completion fires on a keystroke, and against
+this API a request spends a published rate-limit budget, writes a row in the holder's
+audit trail, and on the recipient boundary can consume a burn-after-read dossier. A shell
+that did any of that while someone was still deciding what to type would be indefensible,
+and the failure would be invisible — the completions would look perfectly normal.
+
+`TestCompletionNeverTouchesTheNetwork` walks the whole tree with a server wired up that
+fails the test if it is called, and with a *working* profile seeded, because an
+unauthenticated CLI making no requests proves nothing.
+
+Staleness is tolerated here where the commands refuse it. A completion list is a
+suggestion the server validates a moment later, so a retired status costs one clear error
+message; refusing to complete because the cache turned 24 hours old costs the feature.
+
+#### The Windows mode is a fiction, and the Unix check believed it
+
+`os.Stat` on Windows synthesises a mode from the read-only attribute: an ordinary private
+file reports `0666`. The credentials check was `mode&0o077 != 0`, so it would have refused
+every credentials file on every Windows machine — including the one `login` had just
+written. The CLI would have broken on its own output, and cross-compiling proved nothing,
+because it type-checks perfectly.
+
+So the check is now a platform pair. Unix reads the mode. Windows reads the DACL and asks
+the same question — can any account other than this one read the token — and `PermissionError`
+carries the finding and the remedy rather than formatting one, because `chmod 600` is
+advice a Windows holder cannot follow.
+
+SYSTEM and Administrators are permitted. Refusing them would be theatre: Windows will not
+let a file exist that an administrator cannot reach, so the check would reject every
+possible file and teach the holder to ignore it. `0600` does not keep a secret from root
+either.
+
+Two things fell out of it. `RestrictToOwner` is exported and the document download uses it
+too — a saved passport scan is no more public than a token, and `temp.Chmod(0600)` there
+was doing nothing on Windows. And a directory needs `0700`, not `0600`: the first version
+applied the file mode to the config directory, and the whole store package lost the
+ability to write a temp file.
+
+#### A vetted platform is not a tested one
+
+`GOOS=windows go vet` would pass a DACL check that refuses every file, and one that
+accepts every file. Every mistake this code can make is a runtime one about SIDs and
+access masks. There is now a `windows-latest` job running the store package, where the
+platform code and its own tests live, and `TestRestrictToOwnerSatisfiesTheCheck` closes
+the loop the cross-compile could not: lock a file down, then confirm the checker agrees.
+
+#### Deferred: the keychain backend
+
+§10 lists an optional OS-keychain backend behind `credentials.backend = "keychain"`. Not
+built, and the reason is in §11 Q6 already: the file is auditable, portable to a cron
+host, and has no daemon dependency, while keychains differ per OS and fail *silently* over
+SSH — which is where a CLI like this one most often runs. It is an upgrade to the
+baseline, not a correction of it, and nothing in the product asks for it yet.
