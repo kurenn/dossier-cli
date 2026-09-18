@@ -93,7 +93,11 @@ func newLoginCmd(app *App) *cobra.Command {
 	flags.BoolVar(&tokenStdin, "token-stdin", false, "Read the token from standard input instead of prompting")
 	flags.StringVar(&scopes, "scopes", "", "The scopes you gave this token, comma or space separated (your statement; the API does not report them)")
 	flags.StringVar(&expiresOn, "expires-on", "", "The expiry date shown in Settings, YYYY-MM-DD (your statement; the API does not report it)")
-	flags.StringVar(&name, "name", "", "A label for this profile, shown by `dossier profiles list`")
+	// No backticks: cobra reads a backticked word in a flag's usage string as the argument
+	// placeholder, so this rendered as "--name dossier profiles list" instead of
+	// "--name string". Prose elsewhere in the CLI uses them freely; a flag usage string is
+	// the one place they mean something else.
+	flags.StringVar(&name, "name", "", "A label for this profile, shown by: dossier profiles list")
 
 	// Defined only so it can be refused with a reason. Without it, cobra answers "unknown
 	// flag" — technically correct and completely unhelpful about why.

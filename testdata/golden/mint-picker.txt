@@ -1,0 +1,12 @@
+Expiry (required)
+  1  24 hours   PT24H
+  2  7 days     P7D
+  3  30 days    P30D
+  4  90 days    P90D
+  ─
+  5  No expiry  This is the exception: the link works until you revoke it by hand.
+
+Choose 1–5: Minted.
+
+
+Marisol Vega has been sent the link and this PIN. Do not send the PIN again by another channel.

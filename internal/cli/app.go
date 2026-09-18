@@ -33,6 +33,11 @@ type App struct {
 	Paths store.Paths
 	Now   func() time.Time
 
+	// Sleep is every wait the retry table in §6.3 takes. Injected so a test can drive
+	// three minutes of bounded patience in no time at all, and so it can assert *what* was
+	// waited rather than merely that something was. Production leaves it nil.
+	Sleep func(time.Duration)
+
 	// IsInteractive overrides the terminal check on stdin. Production leaves it nil and
 	// gets the real check; tests set it to drive the prompting paths without a pty.
 	IsInteractive func() bool
@@ -165,11 +170,15 @@ func (a *App) Resolve() (store.Resolution, error) {
 }
 
 // Client builds a transport for the resolved host, carrying the resolved token.
-func (a *App) Client(resolution store.Resolution) (*api.Client, error) {
+func (a *App) Client(resolution store.Resolution, extra ...api.Option) (*api.Client, error) {
 	opts := []api.Option{
 		api.WithUserAgent("dossier-cli/" + Version),
 		api.WithNoWait(a.NoWait),
 	}
+	// Appended after the defaults so a caller can override one. `shares mint` uses this to
+	// force NoWait on at the transport level while still honouring --no-wait itself; see
+	// mintClient.
+	opts = append(opts, extra...)
 	if resolution.Token != "" {
 		opts = append(opts, api.WithToken(resolution.Token))
 	}

@@ -8,6 +8,9 @@ import (
 
 	"github.com/kurenn/dossier-cli/internal/exitcode"
 	"github.com/kurenn/dossier-cli/internal/store"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 func TestVersionGolden(t *testing.T) {
@@ -125,12 +128,47 @@ func TestSchemaCachesAndRefreshes(t *testing.T) {
 	}
 }
 
+// No flag's usage string may contain a backtick.
+//
+// Cobra's UnquoteUsage reads a backticked word as the argument placeholder, so
+// "shown by `dossier profiles list`" rendered as "--name dossier profiles list" where it
+// should have said "--name string". It was found three times — twice after the first
+// sweep was believed complete — because backticks around a command name are the house
+// style everywhere *else* in this CLI's prose, so writing one here is the natural mistake
+// rather than a careless one.
+//
+// Walking the real command tree rather than a list of flags, so a command added later is
+// covered without anyone remembering to add it.
+func TestNoFlagUsageStringContainsABacktick(t *testing.T) {
+	h := newHarness(t)
+	root := NewRoot(h.app)
+
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		check := func(flag *pflag.Flag) {
+			if strings.Contains(flag.Usage, "`") {
+				t.Errorf("%s --%s: usage contains a backtick, which cobra turns into the "+
+					"argument placeholder:\n  %s", cmd.CommandPath(), flag.Name, flag.Usage)
+			}
+		}
+		cmd.Flags().VisitAll(check)
+		cmd.PersistentFlags().VisitAll(check)
+
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
+}
+
 // The one place the binary admits it may be behind the server, rather than letting an
 // unknown code surface later as a mystery exit 1.
 func TestSchemaReportsErrorCodesItCannotMap(t *testing.T) {
+	// Inserted at the head of the array rather than after a named row, so this does not
+	// break every time a field is added to the fixture's error codes.
 	withNewCode := strings.Replace(schemaFixture,
-		`{"code":"rate_limited","status":429}`,
-		`{"code":"rate_limited","status":429},{"code":"quantum_desync","status":418}`, 1)
+		`"error_codes": [`,
+		`"error_codes": [{"code":"quantum_desync","status":418,"message":"Reality diverged.","hint":"Try a different timeline."},`, 1)
 
 	server := fakeAPI(t, map[string]http.HandlerFunc{
 		"/api/v1/schema": jsonResponse(http.StatusOK, withNewCode),

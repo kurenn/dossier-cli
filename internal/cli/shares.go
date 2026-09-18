@@ -19,7 +19,7 @@ func newSharesCmd(app *App) *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(newSharesListCmd(app), newSharesShowCmd(app))
+	cmd.AddCommand(newSharesListCmd(app), newSharesShowCmd(app), newSharesMintCmd(app))
 	return cmd
 }
 
