@@ -362,16 +362,15 @@ func TestContractAuditTrailCarriesRule9sPair(t *testing.T) {
 	data := contractFixture(t)
 	client := contractClient(t, data.Tokens[sharesReader].Raw)
 
-	page, err := client.ListShares(context.Background(), api.ShareQuery{State: "revoked", Limit: 100}, contractTimeout)
-	if err != nil {
-		t.Fatalf("ListShares: %v", err)
-	}
-	if len(page.Shares) == 0 {
-		t.Fatal("the fixture should seed a revoked share")
-	}
-	revoked := page.Shares[0]
+	// By token, not "the first revoked share in the list", which is what this used to do.
+	// M4's burn test spends the fixture's burn share, and a spent one is also revoked —
+	// so the first row became a share whose trail carries `burned` rather than `revoked`,
+	// and this test failed claiming the product rule had regressed. The share it means is
+	// the one the fixture revoked by hand, and it can say so.
+	token, _ := shareByKey(t, data, "revoked")
+	id := shareIDByToken(t, client, token)
 
-	detail, err := client.ShowShare(context.Background(), revoked.ID, contractTimeout)
+	detail, err := client.ShowShare(context.Background(), id, contractTimeout)
 	if err != nil {
 		t.Fatalf("ShowShare: %v", err)
 	}
@@ -398,7 +397,7 @@ func TestContractAuditTrailCarriesRule9sPair(t *testing.T) {
 	// And the rendering: both halves on screen, the server's words verbatim.
 	harness := newHarness(t)
 	t.Setenv("DOSSIER_TOKEN", data.Tokens[sharesReader].Raw)
-	if code := harness.run("shares", "show", fmt.Sprint(revoked.ID), "--no-wait", "--host", contractHost(t)); code != exitcode.OK {
+	if code := harness.run("shares", "show", fmt.Sprint(id), "--no-wait", "--host", contractHost(t)); code != exitcode.OK {
 		t.Fatalf("shares show exited %d\nstderr:\n%s", code, harness.stderr)
 	}
 
@@ -411,7 +410,7 @@ func TestContractAuditTrailCarriesRule9sPair(t *testing.T) {
 			t.Errorf("the rendering omits the meaning %q:\n%s", event.Meaning, output)
 		}
 	}
-	if !strings.Contains(output, "Revoked "+revoked.RevokedAt.UTC().Format("2006-01-02")) {
+	if !strings.Contains(output, "Revoked "+detail.Share.RevokedAt.UTC().Format("2006-01-02")) {
 		t.Errorf("the DEADLINE should show the revocation date:\n%s", output)
 	}
 }

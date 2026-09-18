@@ -17,12 +17,12 @@ ID  TOKEN      TITLE                 RECIPIENT       STATE     DEADLINE      BUR
 
 ## Status
 
-**Milestone 3.** Everything on the owner's side of the API: `version`, `schema`,
-`login`, `logout`, `whoami`, `profiles`, `fields list`, `fields create`,
-`documents attach`, `shares list`, `shares show` and `shares mint`.
+**Milestone 4.** Both sides of the API. The owner's: `version`, `schema`, `login`,
+`logout`, `whoami`, `profiles`, `fields list`, `fields create`, `documents attach`,
+`shares list`, `shares show` and `shares mint`. And the recipient's: `open`.
 
-Still ahead: `open`, the recipient side. So this client can hold a vault and release
-from one, but cannot yet open a dossier as the person it was sent to.
+`open` is the odd one out, and deliberately. It needs no account, no token and no
+`login` — just the link you were given and the PIN that came with it.
 
 ## Install
 
@@ -206,6 +206,61 @@ Exit 11 is the one outcome where the CLI deliberately stops rather than retrying
 dossier may exist and cannot be confirmed. Check `dossier shares list` before minting
 again.
 
+### Opening a dossier someone sent you
+
+This is the other side, and the only command that needs nothing of your own — no
+account, no token, no `login`. You need the link and the PIN, which arrive separately.
+
+```bash
+dossier open K7M2P9QRX
+# PIN: ······
+```
+
+The PIN is read from a hidden prompt. It is never an argument, so it stays out of your
+shell history and out of `ps`, and it is sent in the request body rather than the URL.
+In a script, pipe it in:
+
+```bash
+echo "$PIN" | dossier open K7M2P9QRX --pin-stdin
+```
+
+What comes back is the dossier as the holder released it: their identity snapshot frozen
+at issue, the fields they chose to include, and a bar for each field they did not. The
+bar is a width and nothing more — a withheld value is not hidden in the output, it was
+never sent.
+
+**Opening is not free, and cannot be undone.** The holder sees that you opened it. If
+the dossier was released burn-after-read, the first open is the only one, and there is
+no way to check beforehand — no request exists that would tell you without being the
+open itself. So `open` sends exactly one request and never retries it, not even on the
+rate limit it would happily wait out anywhere else. If that request fails in transit the
+CLI says so plainly rather than trying again:
+
+```
+The request may have reached Dossier. If this was a burn-after-read dossier,
+it may now be consumed. Ask the holder before trying again.
+```
+
+A wrong PIN costs one attempt of five, and the CLI does not re-prompt — a second guess
+is a second invocation, on purpose, so one command cannot walk you into the lock.
+
+Documents are fetched one at a time, by the id the open showed you:
+
+```bash
+dossier open K7M2P9QRX --document 43 --out passport.pdf
+```
+
+That sends no `open` of its own. The id can only have come from an earlier open, and
+re-opening to look it up again would spend a burn dossier to fetch a file from it. The
+file is written through a temp file and a rename at mode `0600`, so an interrupted
+download leaves nothing half-written and nothing world-readable. Use `--out -` for
+stdout, or `--url-only` to print the signed link instead of following it — it carries
+its own permission and lasts about five minutes, so treat it like the PIN.
+
+Documents on a burn-after-read dossier cannot be fetched over the API at all. The API
+refuses them before it checks the PIN, so trying costs nothing, and the CLI says what
+the `404` cannot: the holder will have to send the file another way.
+
 ## How it holds your token
 
 - `~/.config/dossier/credentials.toml`, mode `0600`, in a `0700` directory, written
@@ -277,7 +332,10 @@ with colour stripped, because a pipe strips it.
 ## What it will not do
 
 - **Speak to anything but `/api/v1`.** No web routes, no cookies, no scraped HTML. That
-  restriction is enforced in the transport, not left to discipline.
+  restriction is enforced in the transport, not left to discipline. The single exception
+  is a document download, which follows a signed URL the API itself hands back — a URL
+  the CLI does not compose and treats as opaque. It carries no credential of ours,
+  because the permission is in the URL.
 - **Take a token, a field's value or a PIN as an argument.** Hidden prompt, stdin or a
   file; nothing else. Any of them would otherwise land in your shell history and in `ps`.
   A PIN is never in a URL either.
@@ -295,6 +353,12 @@ with colour stripped, because a pipe strips it.
   none. There is no flag, config key or environment variable that supplies one.
 - **Keep a PIN.** It is printed once and never written to disk — not to the ledger, not
   to the schema cache, not to a profile.
+- **Open a dossier twice to find out what happened.** `open` sends exactly one request
+  per invocation and never retries it, not even the rate limit it would wait out
+  anywhere else. A burn-after-read dossier is spent by its first open, and a retry to
+  learn the outcome is the one action guaranteed to destroy the answer.
+- **Guess whether a dossier is burn-after-read.** There is nothing to ask before the
+  open that would burn it, so the CLI does not pretend otherwise.
 
 ## Contributing
 
