@@ -29,6 +29,9 @@ const sharesPageFixture = `{
       "state": "live",
       "expires_at": "2026-09-22T03:00:00Z",
       "revoked_at": null,
+      "revoked_reason": null,
+      "burn_after_read": true,
+      "allow_document_download": false,
       "opens_count": 0,
       "field_count": 1,
       "batch_id": "b6f2b3f0-9e7a-4c8e-9d21-2f6a8b3c4d5e"
@@ -41,6 +44,9 @@ const sharesPageFixture = `{
       "state": "expiring",
       "expires_at": "2026-09-16T13:07:00Z",
       "revoked_at": null,
+      "revoked_reason": null,
+      "burn_after_read": false,
+      "allow_document_download": true,
       "opens_count": 2,
       "field_count": 3,
       "batch_id": "c7a3d4e1-1f2b-4a5c-8d6e-3f7a9b2c4d5e"
@@ -53,6 +59,9 @@ const sharesPageFixture = `{
       "state": "live",
       "expires_at": null,
       "revoked_at": null,
+      "revoked_reason": null,
+      "burn_after_read": false,
+      "allow_document_download": false,
       "opens_count": 5,
       "field_count": 2,
       "batch_id": null
@@ -65,6 +74,9 @@ const sharesPageFixture = `{
       "state": "revoked",
       "expires_at": "2026-10-16T09:00:00Z",
       "revoked_at": "2026-09-14T17:42:00Z",
+      "revoked_reason": "holder_revoked",
+      "burn_after_read": false,
+      "allow_document_download": false,
       "opens_count": 1,
       "field_count": 4,
       "batch_id": "d8b4e5f2-2a3c-4b6d-9e7f-4a8b3c5d6e7f"
@@ -77,6 +89,9 @@ const sharesPageFixture = `{
       "state": "expired",
       "expires_at": "2026-09-01T09:00:00Z",
       "revoked_at": null,
+      "revoked_reason": null,
+      "burn_after_read": false,
+      "allow_document_download": false,
       "opens_count": 1,
       "field_count": 2,
       "batch_id": null
@@ -146,6 +161,9 @@ const shareDetailFixture = `{
     "state": "revoked",
     "expires_at": "2026-10-16T09:00:00Z",
     "revoked_at": "2026-09-14T17:42:00Z",
+    "revoked_reason": "holder_revoked",
+    "burn_after_read": false,
+    "allow_document_download": false,
     "opens_count": 1,
     "field_count": 4,
     "batch_id": "d8b4e5f2-2a3c-4b6d-9e7f-4a8b3c5d6e7f"

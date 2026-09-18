@@ -9,10 +9,10 @@ browser.
 
 ```console
 $ dossier shares list
-ID  TOKEN      TITLE                 RECIPIENT       STATE     DEADLINE      OPENS  FIELDS
-88  K7M2P9QRX  Lease application     Marisol Vega    LIVE      5d 15h left   0      1
-87  Q2WXM9KRP  Bank KYC              Tomás Herrera   EXPIRING  1h 07m left   2      3
-81  R7KPX2MQ9  Visa appointment      —               EXPIRED   2026-09-01    1      2
+ID  TOKEN      TITLE                 RECIPIENT       STATE     DEADLINE      BURN  OPENS  FIELDS
+88  K7M2P9QRX  Lease application     Marisol Vega    LIVE      5d 15h left   yes   0      1
+87  Q2WXM9KRP  Bank KYC              Tomás Herrera   EXPIRING  1h 07m left   —     2      3
+81  R7KPX2MQ9  Visa appointment      —               EXPIRED   2026-09-01    —     1      2
 ```
 
 ## Status
@@ -84,6 +84,26 @@ dossier you released it in.
 has closed it shows the closing fact instead: the date it was revoked, or the timestamp its
 deadline arrived. It will not show a countdown on a link that no longer works, which is
 also why a revoked dossier never displays the expiry it was minted with.
+
+The `BURN` column is the other half of that deadline. A dossier released burn-after-read
+dies in three days *or* on the first open, whichever comes first, and the countdown alone
+tells you only the slower of the two. The column is blank for an ordinary dossier so the
+ones that burn are what you notice. `shares show` spells the same thing out, along with
+whether the recipient may download documents and — once a dossier has closed — which of
+the three ways it closed:
+
+```console
+$ dossier shares show 83
+...
+REVOKED    2026-09-14T17:42:00Z
+REASON     holder_revoked
+BURN       no
+DOWNLOAD   no
+```
+
+`REASON` is `holder_revoked`, `burned_after_read` or `kill_switch`. The distinction is
+worth having: a dossier that burned is gone for good, while one you revoked by hand can
+still be restored for a short while afterwards.
 
 Both list commands page with a cursor and take `--all` to follow it to the end. `--json`
 gives you the API's response verbatim on stdout and nothing else, one document per page:
