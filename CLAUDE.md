@@ -196,15 +196,45 @@ Two things M1 found and left behind, both in the plan's §12:
   share keeps whatever future expiry it was minted with, and a client reading only
   `expires_at` reports weeks left on a dead link. It is now sent, and
   `TestContractEveryRevokedShareCarriesARevokedAt` asserts both halves.
-- **`burn_after_read` is write-only** (gap 15, open). The mint endpoint accepts it and no
-  read reports it, so neither `shares list` nor `shares show` can say that the live dossier
-  in front of you dies on first read. Not worked around, because there is nothing to work
-  around with: a derived column cannot invent a fact the response does not carry. Not
-  CLI-specific either — the web surfaces it on the mint form and nowhere else. M3 made this
-  sharper rather than resolving it: `shares mint --burn-after-read` can now *set* the flag,
-  and the 201 does not echo it, so the CLI writes a property it can never afterwards read
-  back. M4 will feel it worse — `open` must render the burn refusal, and cannot warn before
-  spending the one read it gets.
+- **`burn_after_read` was write-only** (gap 15, now closed). The mint endpoint accepted it
+  and no read reported it, so neither `shares list` nor `shares show` could say that the
+  live dossier in front of you dies on first read. Not worked around at the time, because
+  there was nothing to work around with: a derived column cannot invent a fact the response
+  does not carry. Not CLI-specific either — the web surfaced it on the mint form and
+  nowhere else. M3 made it sharper rather than resolving it: `shares mint
+  --burn-after-read` could *set* the flag, and the 201 did not echo it, so the CLI wrote a
+  property it could never afterwards read back.
+
+  `share_json` now sends `burn_after_read`, `allow_document_download` and
+  `revoked_reason`. The third overturns a decision gap 14 made on purpose: it argued the
+  reason could stay unserialized because the audit trail carries it. That holds on `show`,
+  which returns the trail, and not at all on `list`, which does not — so distinguishing a
+  burn from a holder's revoke across a page cost one request per row. It also matters more
+  than "why" usually does, because `SharesHelper#share_restorable?` refuses a restore for a
+  burn regardless of timing while a holder's revoke inside the grace period can still be
+  brought back.
+
+  Rendering: a `BURN` column on the list, carrying `yes` or the em dash rather than
+  `yes`/`no`, so a page of ordinary shares stays quiet. It is *not* coloured — §7.2 allows
+  colour on the state word and the countdown and nowhere else, and this is neither. The
+  block shows all three, with `REASON` verbatim: `burned_after_read` is the server's
+  vocabulary and a friendlier gloss here would be the second source of truth rule 9 keeps
+  the audit trail's own `label`/`meaning` away from.
+
+  **This does not help M4, contrary to what this file said while M3 was being built.** The
+  three keys are on the *holder's* endpoints, under `shares:read`. The recipient surface is
+  `POST /dossiers/:token/view` — one call for the whole dossier, with no gate request
+  before it to carry a warning. So `open` still cannot warn before spending the one read it
+  gets, and `open --document` still learns a share burns only by being refused. The plan's
+  **gap 4** is the one that bears on that, it is still open, and it argues an
+  un-authenticated metadata endpoint would be information for a token-guesser.
+
+  The ordering this forced is worth remembering. Adding the keys to the schema's
+  `response_fields` makes `TestContractResponseFieldsAreAllDecoded` fail until `api.Share`
+  models them, and that test runs in *`dossier`'s* CI against `dossier-cli`'s `main`. So
+  the CLI half has to merge first. The check is one-directional on purpose — the CLI may
+  model keys the schema does not advertise — which is what makes that order work and the
+  reverse order break.
 
 ### What M2 turned on
 

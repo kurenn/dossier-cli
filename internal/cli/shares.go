@@ -133,6 +133,15 @@ func stateFilterNote(state string) string {
 //     them. The `_count` suffix is the API naming a scalar; a column of integers under a
 //     count's name does not need it repeated.
 //
+// BURN is the one column added rather than reshaped, and it earns the width by the same
+// argument that put `revoked_at` into DEADLINE: without it the countdown lies. A
+// burn-after-read share reading "in 3 days" is telling a holder the smaller half of the
+// truth — it dies in three days *or* on the first open, whichever lands first, and the
+// first open is the one the product is for. It carries "yes" or the em dash rather than
+// "yes"/"no" so that a page of ordinary shares stays quiet and the burning ones are what
+// the eye catches. Not coloured: §7.2 allows colour on the state word and the countdown,
+// and nowhere else, and this is neither.
+//
 // And `batch_id` is dropped, the one scalar that is. It is a 36-character UUID that would
 // take more width than every other column combined and is a grouping key for siblings of
 // one mint — which `shares show` gives in a block that has no width pressure, and --json
@@ -142,7 +151,7 @@ func (a *App) renderSharesTable(shares []api.Share) {
 	colors := a.Colors()
 	now := a.Now()
 
-	table := render.NewTable("ID", "TOKEN", "TITLE", "RECIPIENT", "STATE", "DEADLINE", "OPENS", "FIELDS")
+	table := render.NewTable("ID", "TOKEN", "TITLE", "RECIPIENT", "STATE", "DEADLINE", "BURN", "OPENS", "FIELDS")
 	for _, share := range shares {
 		state := render.State(share.State)
 		deadline := render.Deadline(state, share.ExpiresAt, share.RevokedAt, now)
@@ -154,6 +163,7 @@ func (a *App) renderSharesTable(shares []api.Share) {
 			share.Recipient.Display(),
 			colors.StateWord(state),
 			colors.Countdown(state, deadline),
+			burnCell(share.BurnAfterRead),
 			strconv.Itoa(share.OpensCount),
 			strconv.Itoa(share.FieldCount),
 		)
@@ -246,6 +256,12 @@ func (a *App) renderShareBlock(share api.Share) {
 	block.AddRaw("DEADLINE", colors.Countdown(state, orEmptyCell(deadline)))
 	block.Add("EXPIRES", formatTimestamp(share.ExpiresAt))
 	block.Add("REVOKED", formatTimestamp(share.RevokedAt))
+	// Verbatim, not glossed: "burned_after_read" is the server's vocabulary, and the CLI
+	// inventing a friendlier word for it would be the second source of truth that rule 9
+	// keeps the audit trail's own `label`/`meaning` away from. Empty until revoked.
+	block.Add("REASON", share.RevokedReason)
+	block.Add("BURN", yesNo(share.BurnAfterRead))
+	block.Add("DOWNLOAD", yesNo(share.AllowDocumentDownload))
 	block.Add("OPENS", strconv.Itoa(share.OpensCount))
 	block.Add("FIELDS", strconv.Itoa(share.FieldCount))
 	block.Add("BATCH", derefOr(share.BatchID, ""))
@@ -316,4 +332,25 @@ func derefOr(s *string, fallback string) string {
 		return fallback
 	}
 	return *s
+}
+
+// yesNo is for a block, where every key the API sent is shown and both answers are worth
+// reading. "false" and "true" are what the wire says; a person reading a block is not
+// reading JSON.
+func yesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
+}
+
+// burnCell is the same fact for a table, where the answer "no" is the overwhelming
+// majority and printing it on every row would be a column of noise with the signal hidden
+// in it. Empty, which render.Table turns into the em dash, so the page stays quiet and the
+// shares that burn are the ones the eye lands on.
+func burnCell(b bool) string {
+	if b {
+		return "yes"
+	}
+	return ""
 }

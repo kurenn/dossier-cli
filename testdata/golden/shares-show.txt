@@ -7,6 +7,9 @@ STATE      REVOKED
 DEADLINE   Revoked 2026-09-14
 EXPIRES    2026-10-16T09:00:00Z
 REVOKED    2026-09-14T17:42:00Z
+REASON     holder_revoked
+BURN       no
+DOWNLOAD   no
 OPENS      1
 FIELDS     4
 BATCH      d8b4e5f2-2a3c-4b6d-9e7f-4a8b3c5d6e7f

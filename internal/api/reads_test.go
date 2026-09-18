@@ -142,6 +142,63 @@ func TestListSharesToleratesAMissingRevokedAt(t *testing.T) {
 	}
 }
 
+// The release terms the mint accepts and reads could not report until gap 15 was closed.
+func TestListSharesDecodesTheReleaseTerms(t *testing.T) {
+	client := testClient(t, jsonHandler(`{"shares":[{"id":88,"state":"live","revoked_reason":null,"burn_after_read":true,"allow_document_download":true}],"next_after":null}`))
+
+	page, err := client.ListShares(context.Background(), ShareQuery{}, time.Second)
+	if err != nil {
+		t.Fatalf("ListShares: %v", err)
+	}
+
+	share := page.Shares[0]
+	// Live and burning at once is the combination the gap was about: the fact is only
+	// useful while the share can still be opened.
+	if share.State != "live" || !share.BurnAfterRead {
+		t.Errorf("burn_after_read on a live share = %v (state %q)", share.BurnAfterRead, share.State)
+	}
+	if !share.AllowDocumentDownload {
+		t.Errorf("allow_document_download = %v", share.AllowDocumentDownload)
+	}
+	if share.RevokedReason != "" {
+		t.Errorf("an open share has no reason, got %q", share.RevokedReason)
+	}
+}
+
+// The reason is a vocabulary token, not a flag: three values, and the CLI must carry one
+// it has never heard of to the screen rather than dropping it.
+func TestListSharesKeepsAReasonItDoesNotKnow(t *testing.T) {
+	client := testClient(t, jsonHandler(`{"shares":[{"id":1,"state":"revoked","revoked_reason":"burned_after_read"},{"id":2,"state":"revoked","revoked_reason":"seized_by_bailiffs"}],"next_after":null}`))
+
+	page, err := client.ListShares(context.Background(), ShareQuery{}, time.Second)
+	if err != nil {
+		t.Fatalf("ListShares: %v", err)
+	}
+	if page.Shares[0].RevokedReason != "burned_after_read" {
+		t.Errorf("reason = %q", page.Shares[0].RevokedReason)
+	}
+	if page.Shares[1].RevokedReason != "seized_by_bailiffs" {
+		t.Errorf("an unknown reason must survive to the screen, got %q", page.Shares[1].RevokedReason)
+	}
+}
+
+// A server that predates the three keys leaves them at their zero values rather than
+// failing to decode — false for both booleans, which is the safer answer for
+// burn_after_read and the more restrictive one for allow_document_download.
+func TestListSharesToleratesAServerWithoutTheReleaseTerms(t *testing.T) {
+	client := testClient(t, jsonHandler(`{"shares":[{"id":83,"state":"revoked","revoked_at":"2026-09-14T17:42:00Z"}],"next_after":null}`))
+
+	page, err := client.ListShares(context.Background(), ShareQuery{}, time.Second)
+	if err != nil {
+		t.Fatalf("ListShares: %v", err)
+	}
+	share := page.Shares[0]
+	if share.BurnAfterRead || share.AllowDocumentDownload || share.RevokedReason != "" {
+		t.Errorf("absent keys should stay zero, got burn=%v download=%v reason=%q",
+			share.BurnAfterRead, share.AllowDocumentDownload, share.RevokedReason)
+	}
+}
+
 func TestShowShareDecodesTheAuditTrail(t *testing.T) {
 	client := testClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.Path; got != "/api/v1/shares/83" {

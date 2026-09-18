@@ -35,6 +35,26 @@ type Share struct {
 	ExpiresAt *time.Time `json:"expires_at"`
 	RevokedAt *time.Time `json:"revoked_at"`
 
+	// RevokedReason says which of the three ways it closed: "holder_revoked",
+	// "burned_after_read" or "kill_switch". Empty while the share is open, so it is read
+	// with RevokedAt rather than instead of it.
+	//
+	// A string, not a typed enum, for the same reason as State: a reason this binary has
+	// not heard of should reach the screen, not become a zero value.
+	RevokedReason string `json:"revoked_reason"`
+
+	// BurnAfterRead and AllowDocumentDownload are the terms the share was released on.
+	// Both were write-only until the API grew them (gap 15) — settable at mint and
+	// readable nowhere — so a server without them leaves these false, which reads as the
+	// safer of the two answers for BurnAfterRead and the more restrictive for
+	// AllowDocumentDownload.
+	//
+	// BurnAfterRead is the one that matters: it is the difference between a dossier that
+	// can be opened and one that is spent by opening it, and it is only useful *before*
+	// the open. Afterwards the share is already revoked and RevokedReason tells the story.
+	BurnAfterRead         bool `json:"burn_after_read"`
+	AllowDocumentDownload bool `json:"allow_document_download"`
+
 	OpensCount int `json:"opens_count"`
 	FieldCount int `json:"field_count"`
 
