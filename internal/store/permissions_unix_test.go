@@ -4,6 +4,7 @@ package store
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -80,4 +81,44 @@ func filepathJoinTemp(t *testing.T) string {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	return path
+}
+
+// assertNotSecret checks the deliberately looser mode on config.toml. There is nothing
+// in it to protect, and 0600 would imply otherwise.
+func assertNotSecret(t *testing.T, path string) {
+	t.Helper()
+
+	if mode := statMode(t, path); mode != 0o644 {
+		t.Errorf("config.toml is %04o, want 0644", mode)
+	}
+}
+
+// XDG is followed rather than inventing ~/.dossier, but only for absolute values — the
+// specification requires it, and a relative value would put the credentials file
+// somewhere relative to whatever directory the CLI was invoked from.
+func TestDefaultPathsHonoursAbsoluteXDGOnly(t *testing.T) {
+	t.Run("absolute values are used", func(t *testing.T) {
+		t.Setenv("XDG_CONFIG_HOME", "/custom/config")
+		paths, err := DefaultPaths()
+		if err != nil {
+			t.Fatalf("DefaultPaths: %v", err)
+		}
+		if paths.ConfigDir != "/custom/config/dossier" {
+			t.Errorf("ConfigDir = %q", paths.ConfigDir)
+		}
+	})
+
+	t.Run("relative values fall back to the specification's default", func(t *testing.T) {
+		t.Setenv("XDG_CONFIG_HOME", "relative/path")
+		paths, err := DefaultPaths()
+		if err != nil {
+			t.Fatalf("DefaultPaths: %v", err)
+		}
+		if strings.Contains(paths.ConfigDir, "relative/path") {
+			t.Errorf("a relative XDG_CONFIG_HOME was honoured: %q", paths.ConfigDir)
+		}
+		if !strings.HasSuffix(paths.ConfigDir, "/.config/dossier") {
+			t.Errorf("ConfigDir = %q, want the ~/.config default", paths.ConfigDir)
+		}
+	})
 }

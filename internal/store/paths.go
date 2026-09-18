@@ -41,19 +41,10 @@ type Paths struct {
 	StateDir  string
 }
 
-// DefaultPaths resolves the XDG roots, falling back to the specification's own defaults.
-func DefaultPaths() (Paths, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return Paths{}, fmt.Errorf("could not find your home directory: %w", err)
-	}
-
-	return Paths{
-		ConfigDir: filepath.Join(xdgRoot("XDG_CONFIG_HOME", filepath.Join(home, ".config")), "dossier"),
-		CacheDir:  filepath.Join(xdgRoot("XDG_CACHE_HOME", filepath.Join(home, ".cache")), "dossier"),
-		StateDir:  filepath.Join(xdgRoot("XDG_STATE_HOME", filepath.Join(home, ".local", "state")), "dossier"),
-	}, nil
-}
+// DefaultPaths resolves where the three roots live on this machine. It is
+// platform-specific — see paths_unix.go and paths_windows.go — because XDG is a
+// specification for Unix desktops and Windows has its own, older answer that its users
+// and its backup software both already expect.
 
 // PathsIn puts all three roots under one directory. For tests, and for a caller that
 // wants everything in one place.
@@ -63,16 +54,6 @@ func PathsIn(root string) Paths {
 		CacheDir:  filepath.Join(root, "cache"),
 		StateDir:  filepath.Join(root, "state"),
 	}
-}
-
-// xdgRoot honours the variable only when it is an absolute path, which the XDG
-// specification requires. A relative value would put the credentials file somewhere
-// relative to whatever directory the CLI happened to be invoked from.
-func xdgRoot(env, fallback string) string {
-	if value := os.Getenv(env); filepath.IsAbs(value) {
-		return value
-	}
-	return fallback
 }
 
 func (p Paths) configFile() string      { return filepath.Join(p.ConfigDir, "config.toml") }

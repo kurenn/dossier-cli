@@ -240,14 +240,9 @@ func TestConfigRoundTripAndDefaults(t *testing.T) {
 	}
 
 	// config.toml holds nothing secret, and making it 0600 beside the credentials would
-	// blur which of the two files actually matters.
-	info, err := os.Stat(paths.configFile())
-	if err != nil {
-		t.Fatalf("Stat: %v", err)
-	}
-	if mode := info.Mode().Perm(); mode != 0o644 {
-		t.Errorf("config.toml is %04o, want 0644", mode)
-	}
+	// blur which of the two files actually matters. Asserted per platform, because
+	// "0644" is not a thing Windows has.
+	assertNotSecret(t, paths.configFile())
 }
 
 // The precedence order from §5.3, each level asserted against the one below it.
@@ -330,36 +325,6 @@ func TestResolvePrecedence(t *testing.T) {
 		got := Resolve(config, creds, "work", "")
 		if got.TokenFromEnv || got.Token != "dsk_work" {
 			t.Errorf("got %+v", got)
-		}
-	})
-}
-
-// XDG is followed rather than inventing ~/.dossier, but only for absolute values — the
-// specification requires it, and a relative value would put the credentials file
-// somewhere relative to whatever directory the CLI was invoked from.
-func TestDefaultPathsHonoursAbsoluteXDGOnly(t *testing.T) {
-	t.Run("absolute values are used", func(t *testing.T) {
-		t.Setenv("XDG_CONFIG_HOME", "/custom/config")
-		paths, err := DefaultPaths()
-		if err != nil {
-			t.Fatalf("DefaultPaths: %v", err)
-		}
-		if paths.ConfigDir != "/custom/config/dossier" {
-			t.Errorf("ConfigDir = %q", paths.ConfigDir)
-		}
-	})
-
-	t.Run("relative values fall back to the specification's default", func(t *testing.T) {
-		t.Setenv("XDG_CONFIG_HOME", "relative/path")
-		paths, err := DefaultPaths()
-		if err != nil {
-			t.Fatalf("DefaultPaths: %v", err)
-		}
-		if strings.Contains(paths.ConfigDir, "relative/path") {
-			t.Errorf("a relative XDG_CONFIG_HOME was honoured: %q", paths.ConfigDir)
-		}
-		if !strings.HasSuffix(paths.ConfigDir, "/.config/dossier") {
-			t.Errorf("ConfigDir = %q, want the ~/.config default", paths.ConfigDir)
 		}
 	})
 }

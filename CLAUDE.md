@@ -507,6 +507,27 @@ was doing nothing on Windows. And a directory needs `0700`, not `0600`: the firs
 applied the file mode to the config directory, and the whole store package lost the
 ability to write a temp file.
 
+#### The paths were never Windows paths either
+
+§5.2 said `%APPDATA%\dossier\`. The code said `~/.config/dossier` on every platform, and
+had since M0. The Windows CI job found it within a minute of first running, on a test
+that had been passing on Linux the whole time.
+
+The failure underneath is sharper than "XDG was applied where it does not belong". The
+shared resolver honoured an XDG variable only when `filepath.IsAbs` said it was absolute
+— and on Windows `filepath.IsAbs("/custom/config")` is **false**. So the code read the
+variable, silently decided it was relative, and discarded it. A Windows holder setting
+`XDG_CONFIG_HOME` would have been ignored without a word, and a Windows holder setting
+nothing would have got a `.config` directory in their profile that no backup tool, no
+roaming profile and no other program looks in.
+
+`DefaultPaths` is now a platform pair, like the permission check. Windows splits roaming
+from local along the lines §5.2 already drew for the three roots: config and credentials
+in `%APPDATA%`, because a token is not machine-specific and a holder on a second
+domain-joined machine should find their profiles; cache and the mint ledger in
+`%LOCALAPPDATA%`, because the schema cache is disposable and host-specific and the ledger
+describes requests *this machine* sent. Roaming the ledger would be actively wrong.
+
 #### A vetted platform is not a tested one
 
 `GOOS=windows go vet` would pass a DACL check that refuses every file, and one that

@@ -131,3 +131,61 @@ func TestRestrictToOwnerMakesADirectoryUsableAndInherited(t *testing.T) {
 			"the ACEs are not inheriting: %v", err)
 	}
 }
+
+// assertNotSecret is a no-op here.
+//
+// config.toml is deliberately 0644 on Unix — it holds a default profile name and nothing
+// worth protecting, and 0600 beside the credentials file would blur which of the two
+// matters. Windows has no mode to make that statement with, and writing a permissive ACL
+// to say "this is not secret" would be inventing a claim nobody asked for: an ordinary
+// file in the user's own %APPDATA% is already exactly as accessible as it should be.
+func assertNotSecret(t *testing.T, path string) {
+	t.Helper()
+
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("config.toml was not written: %v", err)
+	}
+}
+
+// §5.2 says `%APPDATA%\dossier\`, and until M5 the code said `~/.config/dossier` on
+// every platform. Nothing failed, because nothing ran here.
+func TestDefaultPathsUsesTheWindowsLocations(t *testing.T) {
+	t.Setenv("AppData", `C:\Users\test\AppData\Roaming`)
+	t.Setenv("LocalAppData", `C:\Users\test\AppData\Local`)
+
+	paths, err := DefaultPaths()
+	if err != nil {
+		t.Fatalf("DefaultPaths: %v", err)
+	}
+
+	if want := `C:\Users\test\AppData\Roaming\dossier`; paths.ConfigDir != want {
+		t.Errorf("ConfigDir = %q, want %q", paths.ConfigDir, want)
+	}
+	// Cache and state stay local: the schema cache is disposable and host-specific, and
+	// the ledger describes requests this machine sent. Roaming either would be wrong.
+	if want := `C:\Users\test\AppData\Local\dossier\cache`; paths.CacheDir != want {
+		t.Errorf("CacheDir = %q, want %q", paths.CacheDir, want)
+	}
+	if want := `C:\Users\test\AppData\Local\dossier\state`; paths.StateDir != want {
+		t.Errorf("StateDir = %q, want %q", paths.StateDir, want)
+	}
+}
+
+// The XDG variables are not consulted here, and the reason is worth a test rather than a
+// comment: filepath.IsAbs("/custom/config") is false on Windows, so the old shared code
+// did not merely apply a Unix convention on Windows — it read the variable, silently
+// decided it was relative, and discarded it. A holder setting XDG_CONFIG_HOME would have
+// been ignored without a word.
+func TestDefaultPathsIgnoresXDGHere(t *testing.T) {
+	t.Setenv("AppData", `C:\Users\test\AppData\Roaming`)
+	t.Setenv("LocalAppData", `C:\Users\test\AppData\Local`)
+	t.Setenv("XDG_CONFIG_HOME", `D:\somewhere\else`)
+
+	paths, err := DefaultPaths()
+	if err != nil {
+		t.Fatalf("DefaultPaths: %v", err)
+	}
+	if strings.Contains(paths.ConfigDir, "somewhere") {
+		t.Errorf("XDG_CONFIG_HOME was honoured on Windows: %q", paths.ConfigDir)
+	}
+}
