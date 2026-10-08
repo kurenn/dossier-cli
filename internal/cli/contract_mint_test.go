@@ -195,6 +195,11 @@ func TestContractTheRenderedPINOpensTheDossier(t *testing.T) {
 
 	h := newHarness(t)
 	h.app.Sleep = func(time.Duration) {}
+	// The real clock, not the harness's fixedNow. `--expires P7D` is resolved client-side
+	// against App.Now, and a live server refuses a deadline in its own past (rule 2) — so on
+	// fixedNow this test started failing seven days after that date and stayed red for good.
+	// Every other contract test that mints computes its deadline from time.Now already.
+	h.app.Now = time.Now
 	h.seedProfile("contract", store.Profile{Host: host, Token: contractToken(t, data, minter)})
 	h.seedDefaultProfile("contract")
 
