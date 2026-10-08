@@ -197,10 +197,11 @@ func TestContractTheRenderedPINOpensTheDossier(t *testing.T) {
 	h.app.Sleep = func(time.Duration) {}
 	// newHarness pins App.Now to fixedNow so golden output is stable, but this test sends
 	// "--expires P7D" to a real, live server: the CLI resolves that preset against
-	// App.Now (see ParseExpires in mint.go), and the server independently validates the
-	// resulting timestamp against its own wall clock. fixedNow is 2026-09-16, so as soon
-	// as the suite outlives that date the CLI would compute an expiry already in the
-	// past and the server would correctly reject it with validation_failed. Every other
+	// App.Now (see ParseExpires in expiry.go, called from mint.go), and the server
+	// independently validates the resulting timestamp against its own wall clock.
+	// fixedNow is 2026-09-16, so P7D resolves to 2026-09-23, and once the suite outlives
+	// that date the CLI would compute an expiry already in the past and the server would
+	// correctly reject it with validation_failed. Every other
 	// contract test either has no relative expiry to resolve or builds the mint body
 	// itself with time.Now() (see TestContractAReplayIsByteIdenticalIncludingThePIN); this
 	// is the one case where the harness's frozen clock reaches a real clock on the other
